@@ -5,6 +5,7 @@ export interface ICustomer extends Document {
     name: string;
     location_lat: number;
     location_lng: number;
+    address: string;
     created_at: Date;
 }
 
@@ -13,6 +14,7 @@ const customerSchema = new Schema({
     name: { type: String, required: false },
     location_lat: { type: Number, required: false },
     location_lng: { type: Number, required: false },
+    address: { type: String, required: false },
     created_at: { type: Date, default: Date.now }
 });
 

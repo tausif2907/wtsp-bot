@@ -20,11 +20,17 @@ export const verifyWebhook = (req: Request, res: Response) => {
     }
 };
 
+// Deduplication cache: stores processed message IDs to prevent duplicates
+const processedMessages = new Set<string>();
+const MAX_CACHE_SIZE = 1000;
+
 export const handleIncomingMessage = async (req: Request, res: Response) => {
+    // IMMEDIATELY respond 200 so WhatsApp doesn't retry
+    res.sendStatus(200);
+
     try {
         const body = req.body;
 
-        // Check if this is an event from the WhatsApp Business Account
         if (body.object === 'whatsapp_business_account') {
             const entry = body.entry?.[0];
             const changes = entry?.changes?.[0];
@@ -32,20 +38,32 @@ export const handleIncomingMessage = async (req: Request, res: Response) => {
             const message = value?.messages?.[0];
 
             if (message) {
-                const phoneNumberId = value.metadata.phone_number_id;
-                const from = message.from; // sender's phone number
+                const messageId = message.id;
 
-                console.log(`Received message from ${from}`);
+                // Skip if we've already processed this message
+                if (processedMessages.has(messageId)) {
+                    console.log(`Duplicate message ${messageId} - skipping`);
+                    return;
+                }
 
-                // In the next step, we will delegate this to the flow controller.
+                // Mark as processed
+                processedMessages.add(messageId);
+
+                // Prevent memory leak - clear old entries when cache gets too large
+                if (processedMessages.size > MAX_CACHE_SIZE) {
+                    const iterator = processedMessages.values();
+                    for (let i = 0; i < 500; i++) {
+                        processedMessages.delete(iterator.next().value as string);
+                    }
+                }
+
+                const from = message.from;
+                console.log(`Received message from ${from} (id: ${messageId})`);
+
                 await flowController.handleMessage(message);
             }
-            res.sendStatus(200);
-        } else {
-            res.sendStatus(404);
         }
     } catch (error) {
         console.error('Error handling incoming webhook:', error);
-        res.sendStatus(500);
     }
 };

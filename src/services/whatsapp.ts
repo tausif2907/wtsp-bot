@@ -1,4 +1,5 @@
 import axios from 'axios';
+import FormData from 'form-data';
 
 export class WhatsAppService {
     private token: string;
@@ -65,6 +66,144 @@ export class WhatsAppService {
             );
         } catch (error: any) {
             console.error('Error sending WhatsApp interactive list:', error.response?.data || error.message);
+        }
+    }
+
+    async sendInteractiveButtons(to: string, text: string, buttons: { id: string, title: string }[]) {
+        try {
+            await axios.post(
+                this.baseUrl,
+                {
+                    messaging_product: 'whatsapp',
+                    recipient_type: 'individual',
+                    to,
+                    type: 'interactive',
+                    interactive: {
+                        type: 'button',
+                        body: { text },
+                        action: {
+                            buttons: buttons.map(btn => ({
+                                type: 'reply',
+                                reply: {
+                                    id: btn.id,
+                                    title: btn.title
+                                }
+                            }))
+                        }
+                    }
+                },
+                { headers: this.headers }
+            );
+        } catch (error: any) {
+            console.error('Error sending WhatsApp interactive buttons:', error.response?.data || error.message);
+        }
+    }
+
+    async uploadMedia(fileBuffer: Buffer, mimeType: string, filename: string = 'document.pdf'): Promise<string | null> {
+        try {
+            const formData = new FormData();
+            formData.append('file', fileBuffer, {
+                filename,
+                contentType: mimeType,
+            });
+            formData.append('messaging_product', 'whatsapp');
+
+            const uploadUrl = `https://graph.facebook.com/v18.0/${this.phoneId}/media`;
+            const response = await axios.post(uploadUrl, formData, {
+                headers: {
+                    ...formData.getHeaders(),
+                    'Authorization': `Bearer ${this.token}`,
+                }
+            });
+            return response.data.id;
+        } catch (error: any) {
+            console.error('Error uploading WhatsApp media:', error.response?.data || error.message);
+            return null;
+        }
+    }
+
+    async sendDocument(to: string, mediaId: string, filename: string, caption?: string) {
+        try {
+            await axios.post(
+                this.baseUrl,
+                {
+                    messaging_product: 'whatsapp',
+                    recipient_type: 'individual',
+                    to,
+                    type: 'document',
+                    document: {
+                        id: mediaId,
+                        filename: filename,
+                        caption: caption
+                    }
+                },
+                { headers: this.headers }
+            );
+        } catch (error: any) {
+            console.error('Error sending WhatsApp document:', error.response?.data || error.message);
+        }
+    }
+
+    async sendImage(to: string, mediaId: string, caption?: string) {
+        try {
+            await axios.post(
+                this.baseUrl,
+                {
+                    messaging_product: 'whatsapp',
+                    recipient_type: 'individual',
+                    to,
+                    type: 'image',
+                    image: {
+                        id: mediaId,
+                        caption: caption || ''
+                    }
+                },
+                { headers: this.headers }
+            );
+        } catch (error: any) {
+            console.error('Error sending WhatsApp image:', error.response?.data || error.message);
+        }
+    }
+
+    async sendImageLink(to: string, link: string, caption?: string) {
+        try {
+            await axios.post(
+                this.baseUrl,
+                {
+                    messaging_product: 'whatsapp',
+                    recipient_type: 'individual',
+                    to,
+                    type: 'image',
+                    image: {
+                        link,
+                        caption: caption || ''
+                    }
+                },
+                { headers: this.headers }
+            );
+        } catch (error: any) {
+            console.error('Error sending WhatsApp image link:', error.response?.data || error.message);
+        }
+    }
+
+    async sendVideo(to: string, mediaId: string, caption?: string) {
+        try {
+            await axios.post(
+                this.baseUrl,
+                {
+                    messaging_product: 'whatsapp',
+                    recipient_type: 'individual',
+                    to,
+                    type: 'video',
+                    video: {
+                        id: mediaId,
+                        caption: caption || ''
+                    }
+                },
+                { headers: this.headers }
+            );
+        } catch (error: any) {
+            console.error('Error sending WhatsApp video:', error.response?.data || error.message);
         }
     }
 }

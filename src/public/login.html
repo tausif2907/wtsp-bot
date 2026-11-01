@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login — Rashmi Boutique</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #17120b;
+            color: #eaeaea;
+            overflow: hidden;
+        }
+
+        /* Animated background */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(ellipse at 20% 50%, rgba(233, 69, 96, 0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 20%, rgba(0, 149, 255, 0.06) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 80%, rgba(139, 92, 246, 0.06) 0%, transparent 50%);
+            z-index: 0;
+        }
+
+        .login-container {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 420px;
+            padding: 0 1.5rem;
+        }
+
+        .login-card {
+            background: rgba(26, 26, 46, 0.85);
+            backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 20px;
+            padding: 2.5rem;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+        }
+
+        .login-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .login-header .logo {
+            width: 56px;
+            height: 56px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, #816031, #cc9933);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: #fff;
+            margin: 0 auto 1rem;
+            box-shadow: 0 8px 24px rgba(233, 69, 96, 0.3);
+        }
+
+        .login-header h1 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            margin-bottom: 0.35rem;
+        }
+
+        .login-header p {
+            font-size: 0.82rem;
+            color: #a0a0b8;
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.72rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #a0a0b8;
+            margin-bottom: 0.5rem;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            color: #eaeaea;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.88rem;
+            transition: border 0.2s, box-shadow 0.2s;
+            outline: none;
+        }
+
+        .form-group input:focus {
+            border-color: #cc9933;
+            box-shadow: 0 0 0 3px rgba(233, 69, 96, 0.15);
+        }
+
+        .form-group input::placeholder {
+            color: #6c6c8a;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 0.85rem;
+            background: linear-gradient(135deg, #816031, #a67c3d);
+            border: none;
+            border-radius: 10px;
+            color: #fff;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            letter-spacing: 0.02em;
+            box-shadow: 0 4px 16px rgba(233, 69, 96, 0.3);
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(233, 69, 96, 0.4);
+        }
+
+        .submit-btn:active {
+            transform: translateY(0);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .switch-mode {
+            text-align: center;
+            margin-top: 1.25rem;
+            font-size: 0.82rem;
+            color: #a0a0b8;
+        }
+
+        .switch-mode a {
+            color: #cc9933;
+            cursor: pointer;
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .switch-mode a:hover {
+            text-decoration: underline;
+        }
+
+        .error-msg {
+            background: rgba(233, 69, 96, 0.1);
+            border: 1px solid rgba(233, 69, 96, 0.2);
+            border-radius: 8px;
+            padding: 0.65rem 0.9rem;
+            font-size: 0.8rem;
+            color: #e94560;
+            margin-bottom: 1rem;
+            display: none;
+        }
+
+        .success-msg {
+            background: rgba(0, 214, 143, 0.1);
+            border: 1px solid rgba(0, 214, 143, 0.2);
+            border-radius: 8px;
+            padding: 0.65rem 0.9rem;
+            font-size: 0.8rem;
+            color: #00d68f;
+            margin-bottom: 1rem;
+            display: none;
+        }
+
+        /* Name field (only for signup) */
+        #nameGroup {
+            display: none;
+        }
+
+        .show-password {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 0.6rem;
+        }
+
+        .show-password input[type="checkbox"] {
+            width: 14px;
+            height: 14px;
+            accent-color: #cc9933;
+            cursor: pointer;
+            margin: 0;
+            flex-shrink: 0;
+        }
+
+        .show-password label {
+            font-size: 0.78rem;
+            color: #a0a0b8;
+            cursor: pointer;
+            user-select: none;
+            text-transform: none;
+            letter-spacing: 0;
+            font-weight: 400;
+            margin-bottom: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <div class="logo">RB</div>
+                <h1 id="formTitle">Welcome Back</h1>
+                <p id="formSubtitle">Sign in to your admin dashboard</p>
+            </div>
+
+            <div class="error-msg" id="errorMsg"></div>
+            <div class="success-msg" id="successMsg"></div>
+
+            <form id="authForm" onsubmit="handleSubmit(event)">
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="usernameInput" placeholder="Enter username" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="passwordInput" placeholder="Enter your password" required minlength="6"
+                        autocomplete="current-password">
+                    <div class="show-password">
+                        <input type="checkbox" id="showPasswordCheck" onchange="togglePasswordVisibility()">
+                        <label for="showPasswordCheck">Show Password</label>
+                    </div>
+                </div>
+                <button type="submit" class="submit-btn" id="submitBtn">Sign In</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function togglePasswordVisibility() {
+            const pw = document.getElementById('passwordInput');
+            pw.type = document.getElementById('showPasswordCheck').checked ? 'text' : 'password';
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('errorMsg');
+            el.textContent = msg;
+            el.style.display = 'block';
+            document.getElementById('successMsg').style.display = 'none';
+        }
+
+        function showSuccess(msg) {
+            const el = document.getElementById('successMsg');
+            el.textContent = msg;
+            el.style.display = 'block';
+            document.getElementById('errorMsg').style.display = 'none';
+        }
+
+        async function handleSubmit(e) {
+            e.preventDefault();
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+            btn.textContent = 'Signing in...';
+
+            const username = document.getElementById('usernameInput').value.trim();
+            const password = document.getElementById('passwordInput').value;
+
+            try {
+                const res = await fetch('/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await res.json();
+
+                if (!res.ok) {
+                    showError(data.error || 'Something went wrong.');
+                    btn.disabled = false;
+                    btn.textContent = 'Sign In';
+                    return;
+                }
+
+                localStorage.setItem('admin_token', data.token);
+                localStorage.setItem('admin_name', data.name);
+                localStorage.setItem('admin_role', data.role || 'admin');
+
+                showSuccess('Login successful! Redirecting...');
+
+                setTimeout(() => {
+                    if (data.role === 'delivery') {
+                        window.location.href = '/delivery';
+                    } else {
+                        window.location.href = '/dashboard';
+                    }
+                }, 800);
+            } catch (err) {
+                showError('Network error. Please try again.');
+                btn.disabled = false;
+                btn.textContent = 'Sign In';
+            }
+        }
+
+        // Auto login if token exists and is valid
+        window.onload = async () => {
+            const token = localStorage.getItem('admin_token');
+            if (token) {
+                try {
+                    const res = await fetch('/auth/verify', { headers: { 'Authorization': 'Bearer ' + token } });
+                    const data = await res.json();
+                    if (data.valid) {
+                        localStorage.setItem('admin_role', data.role || 'admin');
+                        if (data.role === 'delivery') {
+                            window.location.href = '/delivery';
+                        } else {
+                            window.location.href = '/dashboard';
+                        }
+                    } else {
+                        localStorage.removeItem('admin_token');
+                        localStorage.removeItem('admin_role');
+                    }
+                } catch (e) { }
+            }
+        };
+    </script>
+</body>
+
+</html>

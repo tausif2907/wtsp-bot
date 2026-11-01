@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rashmi Boutique — Admin Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+    <style>
+        /* ===== THEME VARIABLES ===== */
+        :root {
+            --bg-primary: #17120b;
+            --bg-secondary: #211a10;
+            --bg-card: #2a2115;
+            --bg-card-hover: #35291a;
+            --accent: #cc9933;
+            --accent-glow: rgba(204, 153, 51, 0.3);
+            --text-primary: #eaeaea;
+            --text-secondary: #a0a0b8;
+            --text-muted: #6c6c8a;
+            --border: rgba(255, 255, 255, 0.06);
+            --success: #00d68f;
+            --warning: #ffaa00;
+            --info: #0095ff;
+            --danger: #e94560;
+            --input-bg: rgba(255, 255, 255, 0.05);
+            --sidebar-bg: #130f09;
+        }
+
+        [data-theme="light"] {
+            --bg-primary: #f6f3ee;
+            --bg-secondary: #ffffff;
+            --bg-card: #ffffff;
+            --bg-card-hover: #f8f9fa;
+            --accent: #816031;
+            --accent-glow: rgba(129, 96, 49, 0.15);
+            --text-primary: #2b1a1f;
+            --text-secondary: #555;
+            --text-muted: #888;
+            --border: rgba(0, 0, 0, 0.08);
+            --success: #00b371;
+            --warning: #cc8800;
+            --info: #0077cc;
+            --danger: #d63a50;
+            --input-bg: rgba(0, 0, 0, 0.04);
+            --sidebar-bg: #f8f9fb;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            transition: background 0.3s, color 0.3s;
+            display: flex;
+        }
+
+        /* ===== SIDEBAR ===== */
+        .sidebar {
+            width: 240px;
+            background: var(--sidebar-bg);
+            border-right: 1px solid var(--border);
+            height: 100vh;
+            position: fixed;
+            top: 0;
+            left: 0;
+            display: flex;
+            flex-direction: column;
+            transition: background 0.3s, border 0.3s;
+            z-index: 200;
+        }
+
+        .sidebar-brand {
+            padding: 1.5rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .sidebar-brand .logo-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #816031, #cc9933);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 1rem;
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(233, 69, 96, 0.3);
+            flex-shrink: 0;
+        }
+
+        .sidebar-brand .brand-text {
+            font-weight: 700;
+            font-size: 0.92rem;
+            line-height: 1.2;
+        }
+
+        .sidebar-brand .brand-sub {
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+
+        .sidebar-nav {
+            flex: 1;
+            padding: 1rem 0;
+        }
+
+        .sidebar-nav .nav-label {
+            padding: 0.5rem 1.25rem;
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.7rem 1.25rem;
+            margin: 0.15rem 0.6rem;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            transition: all 0.2s;
+            border: none;
+            background: none;
+            width: calc(100% - 1.2rem);
+            text-align: left;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .nav-item:hover {
+            background: var(--input-bg);
+            color: var(--text-primary);
+        }
+
+        .nav-item.active {
+            background: var(--accent);
+            color: #fff;
+            box-shadow: 0 4px 12px var(--accent-glow);
+        }
+
+        .nav-item .nav-icon {
+            width: 20px;
+            text-align: center;
+            font-size: 1rem;
+        }
+
+        .sidebar-footer {
+            padding: 1rem 1.25rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .sidebar-footer .admin-name {
+            font-size: 0.78rem;
+            font-weight: 600;
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .sidebar-footer .admin-email {
+            font-size: 0.68rem;
+            color: var(--text-muted);
+        }
+
+        /* ===== TOP BAR ===== */
+        .topbar {
+            height: 64px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(20px);
+            transition: background 0.3s;
+        }
+
+        .topbar .page-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+
+        .topbar .top-right {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+        }
+
+        .status-indicator .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        .icon-btn {
+            background: var(--input-bg);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .icon-btn:hover {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .logout-btn {
+            background: rgba(233, 69, 96, 0.1);
+            border: 1px solid rgba(233, 69, 96, 0.2);
+            color: var(--danger);
+            padding: 0.4rem 0.8rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.75rem;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .logout-btn:hover {
+            background: var(--danger);
+            color: #fff;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: 0.4
+            }
+        }
+
+        /* ===== MAIN CONTENT ===== */
+        .main-content {
+            margin-left: 240px;
+            flex: 1;
+            min-height: 100vh;
+        }
+
+        .content-area {
+            padding: 1.5rem 2rem;
+            max-width: 1320px;
+        }
+
+        /* ===== STATS ===== */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 1.25rem;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            border-radius: 14px 14px 0 0;
+        }
+
+        .stat-card.c1::before {
+            background: var(--accent);
+        }
+
+        .stat-card.c2::before {
+            background: var(--info);
+        }
+
+        .stat-card.c3::before {
+            background: var(--success);
+        }
+
+        .stat-card.c4::before {
+            background: var(--warning);
+        }
+
+        .stat-card.c5::before {
+            background: #8b5cf6;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        }
+
+        .stat-card .stat-label {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-card .stat-value {
+            font-size: 1.75rem;
+            font-weight: 700;
+        }
+
+        /* ===== TABLE ===== */
+        .table-container {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            overflow-x: auto;
+            overflow-y: hidden;
+            transition: background 0.3s;
+        }
+
+        .table-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .table-header h2 {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .refresh-btn {
+            background: var(--input-bg);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 0.4rem 0.9rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.78rem;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+
+        .refresh-btn:hover {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead th {
+            text-align: left;
+            padding: 0.75rem 1.25rem;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border);
+            background: var(--input-bg);
+        }
+
+        tbody tr {
+            transition: background 0.2s;
+        }
+
+        tbody tr:hover {
+            background: var(--bg-card-hover);
+        }
+
+        tbody td {
+            padding: 0.75rem 1.25rem;
+            font-size: 0.82rem;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* ===== STATUS BADGES ===== */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.65rem;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .badge.order_received {
+            background: rgba(0, 149, 255, 0.12);
+            color: var(--info);
+        }
+
+        .badge.out_for_delivery {
+            background: rgba(0, 149, 255, 0.15);
+            color: #0077cc;
+        }
+
+        .badge.delivered {
+            background: rgba(0, 214, 143, 0.2);
+            color: var(--success);
+        }
+
+        .badge.cancelled {
+            background: rgba(233, 69, 96, 0.12);
+            color: var(--danger);
+        }
+
+        /* ===== STATUS DROPDOWN ===== */
+        .status-select {
+            background: var(--input-bg);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 0.3rem 0.5rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-family: 'Inter', sans-serif;
+            cursor: pointer;
+            transition: border 0.2s;
+            outline: none;
+        }
+
+        .status-select:focus {
+            border-color: var(--accent);
+        }
+
+        .status-select option {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+        }
+
+        /* ===== ACTION BUTTONS ===== */
+        .action-btn {
+            background: var(--input-bg);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 0.3rem 0.6rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.72rem;
+            font-family: 'Inter', sans-serif;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .action-btn:hover {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+
+        .actions-cell {
+            white-space: nowrap;
+        }
+
+        .actions-cell .action-btn {
+            margin-right: 4px;
+        }
+
+        .search-input {
+            padding: 0.45rem 0.9rem;
+            background: var(--input-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            font-size: 0.78rem;
+            outline: none;
+            width: 280px;
+            transition: border 0.2s, box-shadow 0.2s;
+        }
+
+        .search-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(233, 69, 96, 0.15);
+        }
+
+        .search-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .map-link {
+            color: var(--info);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.8rem;
+        }
+
+        .map-link:hover {
+            text-decoration: underline;
+        }
+
+        /* ===== ANALYTICS (BOLD REDESIGN) ===== */
+        .analytics-kpi-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .kpi-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 1.5rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .kpi-card::after {
+            content: '';
+            position: absolute;
+            top: -30px;
+            right: -30px;
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            opacity: 0.05;
+        }
+
+        .kpi-card.k1::after {
+            background: var(--accent);
+        }
+
+        .kpi-card.k2::after {
+            background: var(--info);
+        }
+
+        .kpi-card.k3::after {
+            background: var(--success);
+        }
+
+        .kpi-card.k4::after {
+            background: #8b5cf6;
+        }
+
+        .kpi-card .kpi-icon {
+            font-size: 1.5rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .kpi-card .kpi-value {
+            font-size: 2rem;
+            font-weight: 800;
+            line-height: 1;
+            margin-bottom: 0.35rem;
+        }
+
+        .kpi-card.k1 .kpi-value {
+            color: var(--accent);
+        }
+
+        .kpi-card.k2 .kpi-value {
+            color: var(--info);
+        }
+
+        .kpi-card.k3 .kpi-value {
+            color: var(--success);
+        }
+
+        .kpi-card.k4 .kpi-value {
+            color: #8b5cf6;
+        }
+
+        .kpi-card .kpi-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            font-weight: 600;
+        }
+
+        .analytics-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1.25rem;
+        }
+
+        .chart-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 1.5rem;
+        }
+
+        .chart-card h3 {
+            font-size: 1rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .bar-chart {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .bar-row {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .bar-rank {
+            width: 24px;
+            height: 24px;
+            border-radius: 6px;
+            background: var(--input-bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .bar-label {
+            width: 140px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            flex-shrink: 0;
+        }
+
+        .bar-track {
+            flex: 1;
+            height: 32px;
+            background: var(--input-bg);
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .bar-fill {
+            height: 100%;
+            border-radius: 8px;
+            transition: width 1s cubic-bezier(0.22, 1, 0.36, 1);
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 10px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .bar-fill.c1 {
+            background: linear-gradient(90deg, #e94560, #ff6b81);
+        }
+
+        .bar-fill.c2 {
+            background: linear-gradient(90deg, #0095ff, #38b6ff);
+        }
+
+        .bar-fill.c3 {
+            background: linear-gradient(90deg, #00d68f, #4ade80);
+        }
+
+        .bar-fill.c4 {
+            background: linear-gradient(90deg, #ffaa00, #ffd60a);
+        }
+
+        .bar-fill.c5 {
+            background: linear-gradient(90deg, #8b5cf6, #a78bfa);
+        }
+
+        .bar-pct {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            width: 45px;
+            text-align: right;
+            flex-shrink: 0;
+        }
+
+        /* Status distribution */
+        .status-dist {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .status-dist-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem 1rem;
+            background: var(--input-bg);
+            border-radius: 10px;
+        }
+
+        .status-dist-item .sdi-label {
+            font-size: 0.82rem;
+            font-weight: 500;
+        }
+
+        .status-dist-item .sdi-count {
+            font-size: 1.1rem;
+            font-weight: 800;
+        }
+
+        .status-dist-item.order_received .sdi-count {
+            color: var(--info);
+        }
+
+        .status-dist-item.out_for_delivery .sdi-count {
+            color: #0077cc;
+        }
+
+        .status-dist-item.delivered .sdi-count {
+            color: var(--success);
+        }
+
+        .status-dist-item.cancelled .sdi-count {
+            color: var(--danger);
+        }
+
+        /* ===== EMPTY/LOADING ===== */
+        .empty-state {
+            text-align: center;
+            padding: 3rem 2rem;
+            color: var(--text-muted);
+        }
+
+        .empty-state p {
+            font-size: 0.9rem;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 3rem;
+        }
+
+        .spinner {
+            width: 28px;
+            height: 28px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* ===== TOAST ===== */
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.75rem 1.25rem;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            font-size: 0.85rem;
+            color: var(--text-primary);
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s;
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .toast.success {
+            border-left: 4px solid var(--success);
+        }
+
+        .toast.error {
+            border-left: 4px solid var(--danger);
+        }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 900px) {
+            .analytics-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                display: none;
+            }
+
+            .main-content {
+                margin-left: 0;
+            }
+
+            .content-area {
+                padding: 1rem;
+            }
+
+            .stats-row {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 0.6rem;
+            }
+
+            .stat-card {
+                padding: 1rem;
+            }
+
+            .stat-card .stat-value {
+                font-size: 1.4rem;
+            }
+
+            thead th,
+            tbody td {
+                padding: 0.5rem 0.6rem;
+                font-size: 0.72rem;
+            }
+
+            .analytics-kpi-row {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-brand">
+            <div class="logo-icon">RB</div>
+            <div>
+                <div class="brand-text">Rashmi Boutique</div>
+                <div class="brand-sub">Admin Panel</div>
+            </div>
+        </div>
+
+        <nav class="sidebar-nav">
+            <div class="nav-label">Main Menu</div>
+            <button class="nav-item active" id="nav-orders">
+                Orders
+            </button>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div>
+                <div class="admin-name" id="adminName">Admin</div>
+                <div class="admin-email" id="adminEmail">admin@rashmiboutique</div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- Top Bar -->
+        <div class="topbar">
+            <div class="page-title" id="pageTitle">Orders</div>
+            <div class="top-right">
+                <div class="status-indicator">
+                    <div class="dot"></div><span>System Active</span>
+                </div>
+                <button class="icon-btn" id="themeToggle" onclick="toggleTheme()" title="Toggle Theme">&#9790;</button>
+                <button class="logout-btn" onclick="handleLogout()">Logout</button>
+            </div>
+        </div>
+
+        <div class="content-area">
+            <!-- Stats -->
+            <div class="stats-row" style="grid-template-columns: repeat(3, 1fr);">
+                <div class="stat-card c1">
+                    <div class="stat-label">Total Orders</div>
+                    <div class="stat-value" id="totalOrders">&mdash;</div>
+                </div>
+                <div class="stat-card c3">
+                    <div class="stat-label">Delivered</div>
+                    <div class="stat-value" id="deliveredOrders">&mdash;</div>
+                </div>
+                <div class="stat-card c4">
+                    <div class="stat-label">In Progress</div>
+                    <div class="stat-value" id="activeOrders">&mdash;</div>
+                </div>
+            </div>
+
+            <!-- Orders Section -->
+            <div id="ordersSection" class="table-container">
+                <div class="table-header">
+                    <h2>Order Management</h2>
+                    <div style="display:flex; align-items:center; gap:0.6rem;">
+                        <input type="text" id="orderSearch" class="search-input"
+                            placeholder="Search by name, phone, or order ID..." oninput="filterOrders()">
+                        <button class="refresh-btn" onclick="loadData()">Refresh</button>
+                    </div>
+                </div>
+                <div id="ordersTableBody">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- (Removed Sections) -->
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <script>
+        const STATUS_OPTIONS = [
+            { value: 'order_received', label: 'Order Received' },
+            { value: 'out_for_delivery', label: 'Out for Delivery' },
+            { value: 'delivered', label: 'Delivered' },
+            { value: 'cancelled', label: 'Cancelled' }
+        ];
+
+        let ordersData = [], customersData = [];
+
+        // ===== AUTH CHECK =====
+        (async () => {
+            const token = localStorage.getItem('admin_token');
+            if (!token) { window.location.href = '/login'; return; }
+            try {
+                const res = await fetch('/auth/verify', {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!res.ok) { window.location.href = '/login'; return; }
+                const data = await res.json();
+                document.getElementById('adminName').textContent = data.name || 'Admin';
+                document.getElementById('adminEmail').textContent = data.email || '';
+            } catch (e) { window.location.href = '/login'; }
+        })();
+
+        function handleLogout() {
+            localStorage.removeItem('admin_token');
+            localStorage.removeItem('admin_name');
+            window.location.href = '/login';
+        }
+
+        // ===== THEME =====
+        function setTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('dashboard-theme', theme);
+            document.getElementById('themeToggle').innerHTML = theme === 'dark' ? '&#9790;' : '&#9728;';
+        }
+        function toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme') || 'dark';
+            setTheme(current === 'dark' ? 'light' : 'dark');
+        }
+        setTheme(localStorage.getItem('dashboard-theme') || 'dark');
+
+        // ===== TOAST =====
+        function showToast(msg, type = 'success') {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.className = 'toast ' + type + ' show';
+            setTimeout(() => t.classList.remove('show'), 3000);
+        }
+
+        // ===== TABS =====
+        function switchTab(tab) {
+            const tabs = ['orders', 'customers', 'analytics', 'leads'];
+            const titles = { orders: 'Orders', customers: 'Customers', analytics: 'Analytics', leads: 'Leads' };
+
+            tabs.forEach(t => {
+                const navEl = document.getElementById(`nav-${t}`);
+                if (navEl) navEl.classList.toggle('active', t === tab);
+                const section = document.getElementById(`${t}Section`);
+                if (section) section.style.display = t === tab ? 'block' : 'none';
+            });
+
+            document.getElementById('pageTitle').textContent = titles[tab] || tab;
+            if (tab === 'analytics') loadAnalytics();
+            if (tab === 'leads') loadLeads();
+        }
+
+        function formatDate(d) {
+            if (!d) return '—';
+            const dt = new Date(d);
+            return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + dt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        // ===== STATUS UPDATE =====
+        async function updateStatus(orderId, newStatus) {
+            try {
+                const res = await fetch(`/api/orders/${orderId}/status`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: newStatus })
+                });
+                if (res.ok) {
+                    showToast('Status updated. Customer notified via WhatsApp.');
+                    loadData();
+                } else {
+                    showToast('Failed to update status.', 'error');
+                }
+            } catch (e) {
+                showToast('Network error.', 'error');
+            }
+        }
+
+        // ===== RENDER ORDERS (COMPACT + EXPANDABLE) =====
+        function renderOrders(orders) {
+            const c = document.getElementById('ordersTableBody');
+            if (!orders.length) { c.innerHTML = '<div class="empty-state"><p>No orders found.</p></div>'; return; }
+            let html = `<table><thead><tr>
+                <th>Order ID</th><th>Customer</th><th>Service</th><th>Status</th>
+                <th>Update Status</th>
+            </tr></thead><tbody>`;
+            orders.forEach((o, idx) => {
+                const shortId = o.order_id ? o.order_id.split('-')[0].toUpperCase() : '\u2014';
+                const mapUrl = (o.latitude && o.longitude) ? `https://www.google.com/maps?q=${o.latitude},${o.longitude}` : '';
+                const statusLabel = STATUS_OPTIONS.find(s => s.value === o.status);
+                let selectHtml = `<select class="status-select" onchange="event.stopPropagation(); updateStatus('${o.order_id}', this.value)">`;
+                STATUS_OPTIONS.forEach(s => {
+                    selectHtml += `<option value="${s.value}" ${s.value === o.status ? 'selected' : ''}>${s.label}</option>`;
+                });
+                selectHtml += '</select>';
+                html += `<tr style="cursor:pointer;" onclick="toggleOrderDetail(${idx})">
+                    <td><strong>${shortId}</strong></td>
+                    <td>${o.customer_name || '\u2014'}</td>
+                    <td style="max-width:160px;">${o.service}</td>
+                    <td><span class="badge ${o.status}">${statusLabel ? statusLabel.label : o.status}</span></td>
+                    <td onclick="event.stopPropagation();">${selectHtml}</td>
+                </tr>
+                <tr id="orderDetail-${idx}" style="display:none;">
+                    <td colspan="5" style="padding:0.8rem 1.25rem;background:var(--input-bg);border-bottom:1px solid var(--border);">
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.6rem;font-size:0.78rem;">
+                            <div><span style="color:var(--text-muted);">Phone:</span> <strong>+${o.customer_phone}</strong></div>
+                            <div><span style="color:var(--text-muted);">Date:</span> <strong>${o.booking_date}</strong></div>
+                            <div><span style="color:var(--text-muted);">Time:</span> <strong>${o.booking_time}</strong></div>
+                            <div><span style="color:var(--text-muted);">Address:</span> <strong>${o.address || '\u2014'}</strong></div>
+                            <div><span style="color:var(--text-muted);">Location:</span> ${mapUrl ? `<a href="${mapUrl}" target="_blank" class="map-link">View Map</a>` : '\u2014'}</div>
+                        </div>
+                    </td>
+                </tr>`;
+            });
+            html += '</tbody></table>';
+            c.innerHTML = html;
+        }
+
+        function toggleOrderDetail(idx) {
+            const el = document.getElementById('orderDetail-' + idx);
+            if (el) el.style.display = el.style.display === 'none' ? 'table-row' : 'none';
+        }
+
+        // ===== SEARCH / FILTER ORDERS =====
+        function filterOrders() {
+            const query = document.getElementById('orderSearch').value.toLowerCase().trim();
+            if (!query) { renderOrders(ordersData); return; }
+            const filtered = ordersData.filter(o => {
+                const shortId = o.order_id ? o.order_id.split('-')[0].toUpperCase() : '';
+                return (o.customer_name || '').toLowerCase().includes(query)
+                    || o.customer_phone.includes(query)
+                    || shortId.toLowerCase().includes(query)
+                    || (o.service || '').toLowerCase().includes(query);
+            });
+            renderOrders(filtered);
+        }
+
+        // (Unused JS for Customers/Analytics/Leads removed for Delivery view)
+
+        // ===== LOAD DATA =====
+        async function loadData() {
+            try {
+                const oRes = await fetch('/api/orders');
+                ordersData = await oRes.json();
+
+                renderOrders(ordersData);
+
+                // Delivery stat updates
+                document.getElementById('totalOrders').textContent = ordersData.length;
+                document.getElementById('deliveredOrders').textContent = ordersData.filter(o => o.status === 'delivered').length;
+                const activeStatuses = ['order_received', 'out_for_delivery'];
+                document.getElementById('activeOrders').textContent = ordersData.filter(o => activeStatuses.includes(o.status)).length;
+
+            } catch (e) { console.error('Load error:', e); }
+        }
+
+        loadData();
+        setInterval(loadData, 15000);
+    </script>
+</body>
+
+</html>
