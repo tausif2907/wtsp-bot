@@ -151,6 +151,19 @@ describe('Rashmi Boutique conversation flow', () => {
         expect(ownerAlert[1]).toContain('Maroon Raw Silk Blouse');
     });
 
+    it('opens a category tapped in an earlier list, even while viewing a product', async () => {
+        leadName = 'Priya';
+        await flowController.handleMessage(text('Hi'));
+        await flowController.handleMessage(listItem('menu_shop'));
+        await flowController.handleMessage(listItem('cat:Blouses', 'Blouses'));
+        await flowController.handleMessage(listItem('prod:p1'));
+        expect(stored.current_step).toBe('viewing_product');
+
+        await flowController.handleMessage(listItem('cat:Lehenga', 'Lehenga'));
+        expect(stored.current_step).toBe('browsing_products');
+        expect(lastCall(whatsappService.sendInteractiveList)[2].rows[0].id).toBe('prod:p2');
+    });
+
     it('marks sold-out products and sends text when a product has no photo', async () => {
         leadName = 'Priya';
         await flowController.handleMessage(text('Hi'));

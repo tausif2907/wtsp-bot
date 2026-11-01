@@ -170,7 +170,9 @@ export class FlowController {
         }
 
         try {
-            switch (session.current_step) {
+            if (await this.handleEarlierMenuTap(from, session, message)) {
+                // handled
+            } else switch (session.current_step) {
                 case 'start':
                     await this.handleStart(from, session);
                     break;
@@ -232,6 +234,24 @@ export class FlowController {
 
         // Schedule 5-minute follow-up for abandoned bookings
         this.scheduleFollowUp(from, session.current_step);
+    }
+
+    // Customers often scroll up and tap an older menu, category or product list.
+    // Those choices name what they want, so honour them from any step.
+    private async handleEarlierMenuTap(from: string, session: any, message: any): Promise<boolean> {
+        if (['start', 'collecting_name'].includes(session.current_step)) return false;
+        const id = this.menuChoice(message) || '';
+
+        if (id.startsWith('menu_')) {
+            await this.handleMainMenu(from, session, message);
+        } else if (id.startsWith('cat:')) {
+            await this.handleCategorySelection(from, session, message);
+        } else if (id.startsWith('prod:') || id === 'back_categories') {
+            await this.handleProductSelection(from, session, message);
+        } else {
+            return false;
+        }
+        return true;
     }
 
     private scheduleFollowUp(phone: string, currentStep: string) {
