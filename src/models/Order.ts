@@ -7,6 +7,7 @@ export interface IOrder extends Document {
     service: string;
     booking_date: string;
     booking_time: string;
+    appointment_day?: string;
     latitude?: number;
     longitude?: number;
     address?: string;
@@ -14,6 +15,7 @@ export interface IOrder extends Document {
     price: number;
     invoice_number: string;
     status: string;
+    notes?: string;
     created_at: Date;
 }
 
@@ -24,6 +26,8 @@ const orderSchema = new Schema({
     service: { type: String, required: true },
     booking_date: { type: String, required: true },
     booking_time: { type: String, required: true },
+    // YYYY-MM-DD in India time, so the dashboard can list today's and upcoming appointments
+    appointment_day: { type: String, required: false },
     // Only set for home pickups; shop-visit appointments have no address
     latitude: { type: Number, required: false },
     longitude: { type: Number, required: false },
@@ -35,12 +39,16 @@ const orderSchema = new Schema({
         type: String,
         enum: [
             'order_received',
+            'in_stitching',
+            'ready',
             'out_for_delivery',
             'delivered',
             'cancelled'
         ],
         default: 'order_received'
     },
+    // Measurements and design notes for the team; never sent to the customer
+    notes: { type: String, required: false },
     created_at: { type: Date, default: Date.now }
 });
 

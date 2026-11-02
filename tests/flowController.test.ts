@@ -3,8 +3,9 @@ import { Session } from '../src/models/Session';
 import { Customer } from '../src/models/Customer';
 import { Order } from '../src/models/Order';
 import { Lead } from '../src/models/Lead';
+import { ChatMessage } from '../src/models/ChatMessage';
 import { whatsappService } from '../src/services/whatsapp';
-import { upcomingOpenDays, slotsFor } from '../src/config/store';
+import { upcomingOpenDays, slotsFor, dayLabel } from '../src/config/store';
 
 jest.mock('../src/services/whatsapp', () => ({
     whatsappService: {
@@ -61,6 +62,7 @@ const lastCall = (fn: any) => (fn as jest.Mock).mock.calls[(fn as jest.Mock).moc
 describe('Rashmi Boutique conversation flow', () => {
     let stored: any;
     let leadName: string;
+    let orders: any[];
 
     beforeEach(() => {
         jest.useFakeTimers();
@@ -83,6 +85,9 @@ describe('Rashmi Boutique conversation flow', () => {
         }) as any);
         jest.spyOn(Customer, 'findOneAndUpdate').mockResolvedValue({} as any);
         jest.spyOn(Order, 'create').mockResolvedValue({} as any);
+        jest.spyOn(Order, 'find').mockReturnValue({ sort: () => ({ limit: () => Promise.resolve(orders) }) } as any);
+        jest.spyOn(ChatMessage, 'create').mockResolvedValue({} as any);
+        orders = [];
     });
 
     afterEach(() => {
@@ -106,7 +111,7 @@ describe('Rashmi Boutique conversation flow', () => {
         const [, body, list] = lastCall(whatsappService.sendInteractiveList);
         expect(body).toContain('Priya');
         expect(body).toContain('Festive offer');
-        expect(list.rows.map((r: any) => r.id)).toEqual(['menu_shop', 'menu_book', 'menu_visit', 'menu_talk']);
+        expect(list.rows.map((r: any) => r.id)).toEqual(['menu_shop', 'menu_book', 'menu_orders', 'menu_visit', 'menu_talk']);
     });
 
     it('greets a returning customer by name and skips the name question', async () => {
@@ -184,7 +189,54 @@ describe('Rashmi Boutique conversation flow', () => {
 
         (whatsappService.sendText as jest.Mock).mockClear();
         await flowController.handleMessage(text('I want a blouse like this'));
+        await flowController.handleMessage({ from: PHONE, type: 'image', image: { id: '123456', caption: 'This neckline' } });
         expect(whatsappService.sendText).not.toHaveBeenCalled();
+
+        // Saved for the dashboard inbox, since the team can't read the bot's number in the WhatsApp app
+        expect(ChatMessage.create).toHaveBeenCalledWith({ phone_number: PHONE, direction: 'in', text: 'I want a blouse like this' });
+        expect(ChatMessage.create).toHaveBeenCalledWith({ phone_number: PHONE, direction: 'in', text: 'This neckline', media_id: '123456', media_type: 'image' });
+        expect(stored.handoff_at).toBeInstanceOf(Date);
+    });
+
+    it('shows the customer their bookings with status and price', async () => {
+        leadName = 'Priya';
+        orders = [
+            { order_id: 'ab12cd34-0000', service: 'Designer Blouse', status: 'ready', appointment_type: 'visit', booking_date: 'Wed, 4 Nov', booking_time: '01:00 PM - 03:00 PM', price: 1800 },
+            { order_id: 'ef56ab78-0000', service: 'Lehenga Choli', status: 'order_received', appointment_type: 'pickup', booking_date: 'Thu, 5 Nov', booking_time: '05:00 PM - 07:00 PM', price: 0 }
+        ];
+        await flowController.handleMessage(text('Hi'));
+        await flowController.handleMessage(listItem('menu_orders'));
+
+        const msg = lastCall(whatsappService.sendText)[1];
+        expect(msg).toContain('*AB12CD34* · Outfit Ready');
+        expect(msg).toContain('Price: ₹1,800');
+        expect(msg).toContain('Pickup: Thu, 5 Nov');
+        expect(msg).toContain('Price: shared after measurement');
+        expect(Order.find).toHaveBeenCalledWith({ customer_phone: PHONE });
+    });
+
+    it('offers to book when the customer has no bookings yet', async () => {
+        leadName = 'Priya';
+        await flowController.handleMessage(text('Hi'));
+        await flowController.handleMessage(listItem('menu_orders'));
+
+        const [, body, buttons] = lastCall(whatsappService.sendInteractiveButtons);
+        expect(body).toContain('no bookings');
+        expect(buttons.map((b: any) => b.id)).toContain('menu_book');
+    });
+
+    it('asks again when a day tapped in an old list has passed', async () => {
+        leadName = 'Priya';
+        await flowController.handleMessage(text('Hi'));
+        await flowController.handleMessage(listItem('menu_book'));
+        await flowController.handleMessage(listItem('service_blouse'));
+        await flowController.handleMessage(button('proceed_checkout'));
+        await flowController.handleMessage(button('appt_visit'));
+        await flowController.handleMessage(listItem('date_2020-01-01', 'Wed, 1 Jan'));
+
+        expect(stored.current_step).toBe('selecting_date');
+        expect((whatsappService.sendText as jest.Mock).mock.calls.some(c => c[1].includes('no longer available'))).toBe(true);
+        expect(lastCall(whatsappService.sendInteractiveList)[2].title).toBe('Available Days');
     });
 
     it('books a measurement visit at the boutique without asking for an address', async () => {
@@ -215,8 +267,12 @@ describe('Rashmi Boutique conversation flow', () => {
             appointment_type: 'visit',
             price: 0,
             booking_time: '01:00 PM - 03:00 PM',
+            // Stored without "Today"/"Tomorrow", which would be wrong the next day
+            booking_date: dayLabel(day.id.slice(5)),
+            appointment_day: day.id.slice(5),
             invoice_number: expect.stringMatching(/^RB-\d{8}-\d{4}$/)
         });
+        expect(order.booking_date).not.toMatch(/Today|Tomorrow/);
         expect(order.address).toBeUndefined();
         expect(Session.deleteOne).toHaveBeenCalled();
     });

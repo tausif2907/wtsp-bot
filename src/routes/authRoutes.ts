@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import { Admin } from '../models/Admin';
+import { JWT_SECRET, requireAdmin } from '../middleware/auth';
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'tailor_dashboard_secret_key_2024';
 
 // Signup (Also used to create staff by Admins)
 router.post('/signup', async (req, res) => {
@@ -114,7 +114,7 @@ router.get('/verify', async (req, res) => {
 });
 
 // Get delivery staff list
-router.get('/staff', async (req, res) => {
+router.get('/staff', requireAdmin, async (req, res) => {
     try {
         const staff = await Admin.find({ role: 'delivery' }).select('-password -__v');
         res.json(staff);
@@ -125,7 +125,7 @@ router.get('/staff', async (req, res) => {
 });
 
 // Delete a staff member
-router.delete('/staff/:id', async (req, res) => {
+router.delete('/staff/:id', requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         const result = await Admin.findOneAndDelete({ _id: id, role: 'delivery' });

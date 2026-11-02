@@ -81,11 +81,16 @@ export function upcomingOpenDays(count: number): { id: string; title: string }[]
         if (d.getUTCDay() === STORE.closedWeekday) continue;
         if (offset === 0 && hour >= lastSlotStart) continue; // no slots left today
 
-        const label = d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+        const isoDay = d.toISOString().slice(0, 10);
         const prefix = offset === 0 ? 'Today, ' : offset === 1 ? 'Tomorrow, ' : '';
-        days.push({ id: `date_${d.toISOString().slice(0, 10)}`, title: `${prefix}${label}` });
+        days.push({ id: `date_${isoDay}`, title: `${prefix}${dayLabel(isoDay)}` });
     }
     return days;
+}
+
+/** "Wed, 4 Nov" for "2026-11-04". Orders store this, so it never says "Today" or "Tomorrow". */
+export function dayLabel(isoDay: string): string {
+    return new Date(`${isoDay}T00:00:00Z`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 }
 
 /** Slots still bookable on the given day (drops slots that have already started today). */

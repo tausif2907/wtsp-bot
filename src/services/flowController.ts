@@ -2,9 +2,11 @@ import { Session } from '../models/Session';
 import { Customer } from '../models/Customer';
 import { Order } from '../models/Order';
 import { Lead } from '../models/Lead';
+import { ChatMessage } from '../models/ChatMessage';
 import { whatsappService } from './whatsapp';
+import { STATUS_LABELS, shortOrderId } from './orderUpdates';
 import { generateInvoiceHtml, generatePdfBuffer } from '../utils/pdfGenerator';
-import { STORE, SERVICES, isOpenNow, upcomingOpenDays, slotsFor, storeContactLines } from '../config/store';
+import { STORE, SERVICES, isOpenNow, upcomingOpenDays, slotsFor, storeContactLines, dayLabel } from '../config/store';
 import { getProducts, getProduct, getCategories, getAnnouncement, inStockSizes, isAvailable, formatPrice, productUrl, Product } from './catalog';
 import crypto from 'crypto';
 
@@ -24,14 +26,6 @@ const BOOKING_STEPS = [
 const MAX_LIST_ROWS = 10;
 const ROW_TITLE_MAX = 24;
 const ROW_DESC_MAX = 72;
-
-// Status display labels for WhatsApp notifications
-export const STATUS_LABELS: Record<string, string> = {
-    'order_received': 'Order Received',
-    'out_for_delivery': 'Out for Delivery',
-    'delivered': 'Delivered',
-    'cancelled': 'Cancelled'
-};
 
 const truncate = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
 
@@ -79,7 +73,7 @@ function formatBookingSlip(order: {
         line,
         '*BOOKING CONFIRMATION*',
         `Booking No: ${order.invoice_number}`,
-        `Order ID: ${(order.order_id.split('-')[0] || '').toUpperCase()}`,
+        `Order ID: ${shortOrderId(order.order_id)}`,
         `Date: ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`,
         line,
         `*Customer*`,
@@ -183,7 +177,8 @@ export class FlowController {
                     await this.handleMainMenu(from, session, message);
                     break;
                 case 'talking_to_staff':
-                    // Our team is replying personally — the bot stays quiet until "Hi"
+                    // Our team is replying personally from the dashboard inbox — the bot stays quiet until "Hi"
+                    await this.saveForInbox(from, session, message);
                     break;
                 case 'browsing_categories':
                     await this.handleCategorySelection(from, session, message);
@@ -336,6 +331,7 @@ export class FlowController {
                 rows: [
                     { id: 'menu_shop', title: 'Shop Our Collection', description: 'Ready designs from our online store' },
                     { id: 'menu_book', title: 'Book Stitching', description: 'Book a measurement visit or home pickup' },
+                    { id: 'menu_orders', title: 'My Bookings', description: 'Check the status and price of your orders' },
                     { id: 'menu_visit', title: 'Visit the Boutique', description: 'Address, directions and opening hours' },
                     { id: 'menu_talk', title: 'Talk to Us', description: 'Chat with our boutique team' }
                 ]
@@ -361,6 +357,9 @@ export class FlowController {
             case 'menu_book':
                 session.cart = [];
                 await this.showServiceMenu(from, session);
+                return;
+            case 'menu_orders':
+                await this.showMyBookings(from, session);
                 return;
             case 'menu_visit':
                 await this.sendVisitInfo(from);
@@ -394,8 +393,37 @@ export class FlowController {
         ]);
     }
 
+    private async showMyBookings(from: string, session: any) {
+        session.current_step = 'main_menu';
+        await session.save();
+
+        const orders = await Order.find({ customer_phone: from }).sort({ created_at: -1 }).limit(5);
+        if (orders.length === 0) {
+            await whatsappService.sendInteractiveButtons(from, `You have no bookings with us yet 🌸\n\nWould you like to book a stitching appointment?`, [
+                { id: 'menu_book', title: 'Book Stitching' },
+                { id: 'menu_shop', title: 'Shop Collection' }
+            ]);
+            return;
+        }
+
+        const bookings = orders.map(o => [
+            `*${shortOrderId(o.order_id)}* · ${STATUS_LABELS[o.status] || o.status}`,
+            o.service,
+            `${o.appointment_type === 'pickup' ? 'Pickup' : 'Visit'}: ${o.booking_date}, ${o.booking_time}`,
+            o.price > 0 ? `Price: ${formatPrice(o.price)}` : 'Price: shared after measurement'
+        ].join('\n'));
+        await whatsappService.sendText(from, `🧾 *Your ${STORE.name} bookings*\n\n${bookings.join('\n\n')}`);
+        await whatsappService.sendInteractiveButtons(from, 'Anything else we can help you with?', [
+            { id: 'menu_talk', title: 'Talk to Us' },
+            { id: 'menu_book', title: 'Book Stitching' },
+            { id: 'menu_home', title: 'Main Menu' }
+        ]);
+    }
+
     private async handOffToStaff(from: string, session: any, product?: Product) {
         session.current_step = 'talking_to_staff';
+        session.handoff_at = new Date();
+        session.handoff_topic = product ? product.name : '';
         await session.save();
 
         const about = product ? ` about *${product.name}*` : '';
@@ -409,9 +437,25 @@ export class FlowController {
             const productLines = product ? ['', `Asking about: ${product.name} (${formatPrice(product.price)})`, productUrl(product)].filter(Boolean) : [];
             await whatsappService.sendText(
                 ownerPhone,
-                [`*CUSTOMER WANTS TO TALK*`, '', `Name: ${session.name || 'Unknown'}`, `Phone: +${from}`, ...productLines, '', 'Please reply to them on WhatsApp.'].join('\n')
+                [`*CUSTOMER WANTS TO TALK*`, '', `Name: ${session.name || 'Unknown'}`, `Phone: +${from}`, ...productLines, '', 'Their messages are in the dashboard inbox. Please reply from there.'].join('\n')
             );
         }
+    }
+
+    // Keep what the customer sends while our team is chatting, for the dashboard inbox
+    private async saveForInbox(from: string, session: any, message: any) {
+        const media = ['image', 'document', 'audio', 'video', 'sticker'].includes(message.type) ? message[message.type] : null;
+        const text = message.type === 'location'
+            ? `📍 Shared a location: https://www.google.com/maps?q=${message.location.latitude},${message.location.longitude}`
+            : message.text?.body ?? message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? media?.caption ?? '';
+
+        await ChatMessage.create({
+            phone_number: from,
+            direction: 'in',
+            text,
+            ...(media?.id ? { media_id: media.id, media_type: message.type } : {})
+        });
+        await session.save(); // keeps the chat open; sessions expire a day after the last message
     }
 
     // ---------------------------------------------------------------- shop collection (from the website)
@@ -622,7 +666,10 @@ export class FlowController {
         session.appointment_type = id === 'appt_pickup' ? 'pickup' : 'visit';
         session.current_step = 'selecting_date';
         await session.save();
+        await this.sendDateList(from);
+    }
 
+    private async sendDateList(from: string) {
         await whatsappService.sendInteractiveList(
             from,
             `📅 Which day suits you?\n\n_We are closed on Tuesdays._`,
@@ -640,8 +687,16 @@ export class FlowController {
             return;
         }
 
+        // A date tapped in a list sent days ago may have passed
         const dateId = message.interactive.list_reply.id;
-        session.selected_date = message.interactive.list_reply.title;
+        if (!upcomingOpenDays(7).some(d => d.id === dateId)) {
+            await whatsappService.sendText(from, 'Sorry, that day is no longer available. Please choose another day.');
+            await this.sendDateList(from);
+            return;
+        }
+
+        session.selected_day = dateId.slice('date_'.length);
+        session.selected_date = dayLabel(session.selected_day);
         session.current_step = 'selecting_time';
         await session.save();
 
@@ -767,6 +822,7 @@ export class FlowController {
                 service: serviceNames,
                 booking_date: session.selected_date,
                 booking_time: session.selected_time,
+                appointment_day: session.selected_day,
                 appointment_type: isPickup ? 'pickup' : 'visit',
                 ...(isPickup ? { latitude: session.location_lat, longitude: session.location_lng, address: session.address } : {}),
                 price: totalPrice,
@@ -784,12 +840,12 @@ export class FlowController {
                 : `We look forward to seeing you at the boutique on *${session.selected_date}, ${session.selected_time}*.\n\n📍 ${STORE.address}${STORE.mapsLink ? `\n🗺️ ${STORE.mapsLink}` : ''}`;
             await whatsappService.sendText(
                 from,
-                `🎉 Your booking is confirmed, ${session.name}!\n\nOrder ID: *${(orderId.split('-')[0] || '').toUpperCase()}*\nBooking No: *${invoiceNumber}*\n\n${nextStep}\n\nYou will receive status updates on this chat. Thank you for choosing ${STORE.name} 🌸`
+                `🎉 Your booking is confirmed, ${session.name}!\n\nOrder ID: *${shortOrderId(orderId)}*\nBooking No: *${invoiceNumber}*\n\n${nextStep}\n\nYou will receive status updates on this chat. Thank you for choosing ${STORE.name} 🌸`
             );
 
             // 5. Send PDF booking slip
             try {
-                const html = await generateInvoiceHtml(orderData, 'Order Received', mapUrl);
+                const html = await generateInvoiceHtml(orderData, STATUS_LABELS.order_received || 'Booked', mapUrl);
                 const pdfBuffer = await generatePdfBuffer(html);
                 const fileName = `${STORE.name.replace(/\s+/g, '_')}_${invoiceNumber}.pdf`;
                 const mediaId = await whatsappService.uploadMedia(pdfBuffer, 'application/pdf', fileName);
@@ -806,7 +862,7 @@ export class FlowController {
                 const ownerMsg = [
                     `*NEW ${STORE.name.toUpperCase()} BOOKING*`,
                     '',
-                    `Order ID: ${(orderId.split('-')[0] || '').toUpperCase()}`,
+                    `Order ID: ${shortOrderId(orderId)}`,
                     `Booking No: ${invoiceNumber}`,
                     '',
                     '*Customer Details*',

@@ -21,7 +21,8 @@ export class WhatsAppService {
         };
     }
 
-    async sendText(to: string, text: string) {
+    /** Returns false when WhatsApp refuses the message (for example outside the 24-hour reply window). */
+    async sendText(to: string, text: string): Promise<boolean> {
         try {
             await axios.post(
                 this.baseUrl,
@@ -34,8 +35,10 @@ export class WhatsAppService {
                 },
                 { headers: this.headers }
             );
+            return true;
         } catch (error: any) {
             console.error('Error sending WhatsApp text:', error.response?.data || error.message);
+            return false;
         }
     }
 
@@ -118,6 +121,21 @@ export class WhatsAppService {
             return response.data.id;
         } catch (error: any) {
             console.error('Error uploading WhatsApp media:', error.response?.data || error.message);
+            return null;
+        }
+    }
+
+    /** Fetches a photo or file a customer sent. WhatsApp media links only work with our token. */
+    async downloadMedia(mediaId: string): Promise<{ data: Buffer; mimeType: string } | null> {
+        try {
+            const meta = await axios.get(`https://graph.facebook.com/v18.0/${mediaId}`, { headers: this.headers });
+            const file = await axios.get(meta.data.url, {
+                headers: { 'Authorization': `Bearer ${this.token}` },
+                responseType: 'arraybuffer'
+            });
+            return { data: Buffer.from(file.data), mimeType: meta.data.mime_type || 'application/octet-stream' };
+        } catch (error: any) {
+            console.error('Error downloading WhatsApp media:', error.response?.data || error.message);
             return null;
         }
     }

@@ -1,5 +1,6 @@
 import puppeteer from 'puppeteer';
 import { STORE, storeContactLines } from '../config/store';
+import { escapeHtml as esc } from './html';
 
 export async function generateInvoiceHtml(order: any, statusLabel: string, mapUrl: string): Promise<string> {
     // Stitching is priced after measurement; until then this is a booking slip rather than an invoice
@@ -9,7 +10,7 @@ export async function generateInvoiceHtml(order: any, statusLabel: string, mapUr
 <html><head>
 <meta charset="UTF-8">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
-<title>${STORE.name} ${isPriced ? 'Invoice' : 'Booking'} - ${order.invoice_number || 'N/A'}</title>
+<title>${STORE.name} ${isPriced ? 'Invoice' : 'Booking'} - ${esc(order.invoice_number || 'N/A')}</title>
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Montserrat', 'Segoe UI', Arial, sans-serif; padding: 40px; color: #2b1a1f; background: #fff; }
@@ -37,25 +38,25 @@ export async function generateInvoiceHtml(order: any, statusLabel: string, mapUr
             <p style="font-size:13px; color:#888; margin-top:4px;">${STORE.tagline}</p>
         </div>
         <div class="inv-details">
-            <p><strong>${isPriced ? 'Invoice' : 'Booking'} No:</strong> ${order.invoice_number || 'N/A'}</p>
+            <p><strong>${isPriced ? 'Invoice' : 'Booking'} No:</strong> ${esc(order.invoice_number || 'N/A')}</p>
             <p><strong>Order ID:</strong> ${(order.order_id.split('-')[0] || '').toUpperCase()}</p>
             <p><strong>Date:</strong> ${new Date(order.created_at || Date.now()).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
-            <p>Status: <span class="status">${statusLabel}</span></p>
+            <p>Status: <span class="status">${esc(statusLabel)}</span></p>
         </div>
     </div>
     <div class="section">
         <h3>Customer Details</h3>
-        <p><strong>Name:</strong> ${order.customer_name}</p>
-        <p><strong>Phone:</strong> +${order.customer_phone || order.phone_number || ''}</p>
-        ${isPickup ? `<p><strong>Pickup Address:</strong> ${order.address || '—'}</p>` : ''}
-        ${mapUrl ? `<p><strong>Location:</strong> <a href="${mapUrl}" target="_blank">View on Google Maps</a></p>` : ''}
+        <p><strong>Name:</strong> ${esc(order.customer_name)}</p>
+        <p><strong>Phone:</strong> +${esc(order.customer_phone || order.phone_number || '')}</p>
+        ${isPickup ? `<p><strong>Pickup Address:</strong> ${esc(order.address || '—')}</p>` : ''}
+        ${mapUrl ? `<p><strong>Location:</strong> <a href="${esc(mapUrl)}" target="_blank">View on Google Maps</a></p>` : ''}
     </div>
     <div class="section">
         <h3>Order Details</h3>
-        <p><strong>Service:</strong> ${order.service}</p>
+        <p><strong>Service:</strong> ${esc(order.service)}</p>
         <p><strong>Appointment:</strong> ${isPickup ? 'Home pickup' : `Measurement visit at ${STORE.address}`}</p>
-        <p><strong>Date:</strong> ${order.booking_date}</p>
-        <p><strong>Time:</strong> ${order.booking_time}</p>
+        <p><strong>Date:</strong> ${esc(order.booking_date)}</p>
+        <p><strong>Time:</strong> ${esc(order.booking_time)}</p>
     </div>
     <div class="amount-box">
         <div class="label">Total Amount</div>
@@ -64,7 +65,7 @@ export async function generateInvoiceHtml(order: any, statusLabel: string, mapUr
     <div class="footer">
         <p>Thank you for choosing ${STORE.name}.</p>
         <p style="margin-top: 4px;">For queries, reply to us on WhatsApp.</p>
-        ${storeContactLines().map(l => `<p style="margin-top: 4px;">${l}</p>`).join('')}
+        ${storeContactLines().map(l => `<p style="margin-top: 4px;">${esc(l)}</p>`).join('')}
     </div>
 </div>
 </body></html>`;

@@ -10,6 +10,7 @@ export interface ISession extends Document {
     current_step: string;
     selected_service?: string;
     selected_date?: string;
+    selected_day?: string;
     selected_time?: string;
     name?: string;
     location_lat?: number;
@@ -18,6 +19,8 @@ export interface ISession extends Document {
     appointment_type?: string;
     browse_category?: string;
     product_id?: string;
+    handoff_at?: Date;
+    handoff_topic?: string;
     cart: ICartItem[];
     updated_at: Date;
 }
@@ -32,6 +35,7 @@ const sessionSchema = new Schema({
     current_step: { type: String, required: true, default: 'start' },
     selected_service: { type: String, required: false },
     selected_date: { type: String, required: false },
+    selected_day: { type: String, required: false },
     selected_time: { type: String, required: false },
     name: { type: String, required: false },
     location_lat: { type: Number, required: false },
@@ -40,6 +44,9 @@ const sessionSchema = new Schema({
     appointment_type: { type: String, required: false },
     browse_category: { type: String, required: false },
     product_id: { type: String, required: false },
+    // Set when the customer asks to talk to the team; the chat then shows in the dashboard inbox
+    handoff_at: { type: Date, required: false },
+    handoff_topic: { type: String, required: false },
     cart: { type: [cartItemSchema], default: [] },
     updated_at: { type: Date, default: Date.now }
 });

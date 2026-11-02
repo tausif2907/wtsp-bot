@@ -1,15 +1,32 @@
 import { Router } from 'express';
+import multer from 'multer';
+import { parse } from 'csv-parse/sync';
 import { Customer } from '../models/Customer';
 import { Order } from '../models/Order';
+import { Lead } from '../models/Lead';
+import { Session } from '../models/Session';
+import { ChatMessage } from '../models/ChatMessage';
 import { whatsappService } from '../services/whatsapp';
-import { STATUS_LABELS } from '../services/flowController';
+import { ORDER_STATUSES, STATUS_LABELS, shortOrderId, statusUpdateMessage, priceQuoteMessage } from '../services/orderUpdates';
+import { getProducts, isCatalogConfigured, clearCatalogCache } from '../services/catalog';
 import { STORE, storeContactLines } from '../config/store';
 import { generateInvoiceHtml } from '../utils/pdfGenerator';
+import { escapeHtml as esc } from '../utils/html';
+import { requireStaff, requireAdmin } from '../middleware/auth';
 
 const router = Router();
 
+// Every dashboard API needs a login. Delivery staff can see orders and update their status;
+// everything else is for boutique admins.
+router.use(requireStaff);
+
+const PHONE_PATTERN = /^\d{6,15}$/;
+
+// Route params are typed loosely once a route has extra middleware
+const param = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value) || '';
+
 // Get all customers
-router.get('/customers', async (req, res) => {
+router.get('/customers', requireAdmin, async (req, res) => {
     try {
         const customers = await Customer.find().sort({ created_at: -1 });
         res.json(customers);
@@ -34,11 +51,7 @@ router.patch('/orders/:orderId/status', async (req, res) => {
         const { orderId } = req.params;
         const { status } = req.body;
 
-        const validStatuses = [
-            'order_received', 'out_for_delivery', 'delivered', 'cancelled'
-        ];
-
-        if (!validStatuses.includes(status)) {
+        if (!ORDER_STATUSES.some(s => s.value === status)) {
             res.status(400).json({ error: 'Invalid status' });
             return;
         }
@@ -54,42 +67,60 @@ router.patch('/orders/:orderId/status', async (req, res) => {
             return;
         }
 
-        // Send WhatsApp notification to customer
-        const shortId = (order.order_id.split('-')[0] || '').toUpperCase();
-        const statusLabel = STATUS_LABELS[status] || status;
-        const statusMessages: Record<string, string> = {
-            'order_received': `Your order ${shortId} has been received. Our team will be in touch for pickup shortly.`,
-            'out_for_delivery': `Your outfit is ready! 🎉 Order ${shortId} is out for delivery and our agent is on the way.`,
-            'delivered': `Your order ${shortId} has been delivered. We hope you love the fit! Thank you for choosing ${STORE.name} 🌸`,
-            'cancelled': `Your order ${shortId} has been cancelled. Please reply to this chat if you need any help.`
-        };
-
-        const notificationMsg = [
-            `*${STORE.name} — Order Update*`,
-            ``,
-            `Order ID: ${shortId}`,
-            `Service: ${order.service}`,
-            `Status: *${statusLabel}*`,
-            ``,
-            statusMessages[status] || `Your order status has been updated to: ${statusLabel}.`
-        ].join('\n');
-
-        await whatsappService.sendText(order.customer_phone, notificationMsg);
-
-        res.json({ success: true, order });
+        const notified = await whatsappService.sendText(order.customer_phone, statusUpdateMessage(order));
+        res.json({ success: true, notified, order });
     } catch (error) {
         console.error('Error updating order status:', error);
         res.status(500).json({ error: 'Failed to update status' });
     }
 });
 
+// Set the price after measurement and keep the team's notes
+router.patch('/orders/:orderId', requireAdmin, async (req, res) => {
+    try {
+        const order = await Order.findOne({ order_id: param(req.params.orderId) });
+        if (!order) {
+            res.status(404).json({ error: 'Order not found' });
+            return;
+        }
+
+        const { price, notes, notify } = req.body;
+        const priceChanged = price !== undefined && Number(price) !== order.price;
+
+        if (price !== undefined) {
+            const amount = Number(price);
+            if (!Number.isFinite(amount) || amount < 0 || amount > 10000000) {
+                res.status(400).json({ error: 'Please enter a valid price.' });
+                return;
+            }
+            order.price = Math.round(amount);
+        }
+        if (notes !== undefined) {
+            order.notes = String(notes).slice(0, 5000);
+        }
+        await order.save();
+
+        let notified = false;
+        if (notify && priceChanged && order.price > 0) {
+            notified = await whatsappService.sendText(order.customer_phone, priceQuoteMessage(order));
+        }
+
+        res.json({ success: true, notified, order });
+    } catch (error) {
+        console.error('Error updating order:', error);
+        res.status(500).json({ error: 'Failed to update order' });
+    }
+});
+
 // Analytics — service popularity
-router.get('/analytics', async (req, res) => {
+router.get('/analytics', requireAdmin, async (req, res) => {
     try {
         const orders = await Order.find();
         const serviceCounts: Record<string, number> = {};
         const statusCounts: Record<string, number> = {};
+        const appointmentCounts: Record<string, number> = { visit: 0, pickup: 0 };
         let totalRevenue = 0;
+        let awaitingPrice = 0;
 
         orders.forEach(order => {
             if (order.service) {
@@ -102,13 +133,19 @@ router.get('/analytics', async (req, res) => {
                 });
             }
             statusCounts[order.status] = (statusCounts[order.status] || 0) + 1;
+            appointmentCounts[order.appointment_type === 'visit' ? 'visit' : 'pickup']! += 1;
+
+            if (order.status === 'cancelled') return;
             totalRevenue += order.price || 0;
+            if (!order.price && order.status !== 'delivered') awaitingPrice++;
         });
 
         res.json({
             serviceCounts,
             statusCounts,
+            appointmentCounts,
             totalRevenue,
+            awaitingPrice,
             totalOrders: orders.length
         });
     } catch (error) {
@@ -158,7 +195,7 @@ router.get('/orders/:orderId/receipt', async (req, res) => {
             return;
         }
 
-        const shortId = (order.order_id.split('-')[0] || '').toUpperCase();
+        const shortId = shortOrderId(order.order_id);
         const orderDate = new Date(order.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 
         // Parse services if comma-separated (cart items)
@@ -210,23 +247,23 @@ router.get('/orders/:orderId/receipt', async (req, res) => {
     <hr class="divider">
 
     <div class="row"><span class="label">Date:</span><span class="value">${orderDate}</span></div>
-    <div class="row"><span class="label">Invoice:</span><span class="value">${order.invoice_number || 'N/A'}</span></div>
+    <div class="row"><span class="label">Invoice:</span><span class="value">${esc(order.invoice_number || 'N/A')}</span></div>
 
     <hr class="divider">
     <div class="section-title">Customer</div>
-    <div class="row"><span class="label">Name:</span><span class="value">${order.customer_name}</span></div>
-    <div class="row"><span class="label">Phone:</span><span class="value">+${order.customer_phone}</span></div>
-    <div class="row"><span class="label">Address:</span><span class="value">${order.address || 'Visit to boutique'}</span></div>
+    <div class="row"><span class="label">Name:</span><span class="value">${esc(order.customer_name)}</span></div>
+    <div class="row"><span class="label">Phone:</span><span class="value">+${esc(order.customer_phone)}</span></div>
+    <div class="row"><span class="label">Address:</span><span class="value">${esc(order.address || 'Visit to boutique')}</span></div>
 
     <hr class="divider">
     <div class="section-title">Items</div>
     <div class="items">
-        ${services.map((s: string) => `<div class="item-row"><span>${s}</span></div>`).join('')}
+        ${services.map((s: string) => `<div class="item-row"><span>${esc(s)}</span></div>`).join('')}
     </div>
 
     <hr class="divider">
-    <div class="row"><span class="label">Appointment:</span><span class="value">${order.booking_date}</span></div>
-    <div class="row"><span class="label">Time Slot:</span><span class="value">${order.booking_time}</span></div>
+    <div class="row"><span class="label">Appointment:</span><span class="value">${esc(order.booking_date)}</span></div>
+    <div class="row"><span class="label">Time Slot:</span><span class="value">${esc(order.booking_time)}</span></div>
 
     <div class="total-row">
         <span>TOTAL</span>
@@ -237,7 +274,7 @@ router.get('/orders/:orderId/receipt', async (req, res) => {
     <div class="footer">
         Thank you for choosing ${STORE.name}!<br>
         Please retain this receipt.
-        ${storeContactLines().map(l => `<br>${l}`).join('')}
+        ${storeContactLines().map(l => `<br>${esc(l)}`).join('')}
     </div>
 </div>
 
@@ -252,11 +289,152 @@ router.get('/orders/:orderId/receipt', async (req, res) => {
     }
 });
 
+// ===== INBOX (customers who chose "Talk to Us") =====
+
+// Open chats, newest activity first
+router.get('/inbox', requireAdmin, async (req, res) => {
+    try {
+        const sessions = await Session.find({ current_step: 'talking_to_staff' }).sort({ updated_at: -1 });
+        const chats = await Promise.all(sessions.map(async session => {
+            const since = session.handoff_at || session.updated_at;
+            const [last, lastIn] = await Promise.all([
+                ChatMessage.findOne({ phone_number: session.phone_number, created_at: { $gte: since } }).sort({ created_at: -1 }),
+                ChatMessage.findOne({ phone_number: session.phone_number, direction: 'in' }).sort({ created_at: -1 })
+            ]);
+            return {
+                phone: session.phone_number,
+                name: session.name || '',
+                topic: session.handoff_topic || '',
+                since,
+                last: last ? { text: last.text || (last.media_type ? `[${last.media_type}]` : ''), direction: last.direction, at: last.created_at } : null,
+                // The customer's last word: WhatsApp only allows free replies for 24 hours after it
+                lastCustomerAt: lastIn && lastIn.created_at > since ? lastIn.created_at : since,
+                waitingReply: !last || last.direction === 'in'
+            };
+        }));
+        res.json(chats);
+    } catch (error) {
+        console.error('Inbox error:', error);
+        res.status(500).json({ error: 'Failed to load the inbox' });
+    }
+});
+
+// One conversation
+router.get('/inbox/:phone', requireAdmin, async (req, res) => {
+    try {
+        const phone = param(req.params.phone);
+        if (!PHONE_PATTERN.test(phone)) {
+            res.status(400).json({ error: 'Invalid phone number' });
+            return;
+        }
+        const [session, messages] = await Promise.all([
+            Session.findOne({ phone_number: phone }),
+            ChatMessage.find({ phone_number: phone }).sort({ created_at: -1 }).limit(100)
+        ]);
+        res.json({
+            phone,
+            name: session?.name || '',
+            topic: session?.handoff_topic || '',
+            open: session?.current_step === 'talking_to_staff',
+            messages: messages.reverse()
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to load the conversation' });
+    }
+});
+
+// Reply to the customer on WhatsApp
+router.post('/inbox/:phone/reply', requireAdmin, async (req, res) => {
+    try {
+        const phone = param(req.params.phone);
+        const text = String(req.body.text || '').trim();
+        if (!PHONE_PATTERN.test(phone) || !text) {
+            res.status(400).json({ error: 'Please type a message.' });
+            return;
+        }
+        if (text.length > 4000) {
+            res.status(400).json({ error: 'Message is too long for WhatsApp.' });
+            return;
+        }
+
+        const sent = await whatsappService.sendText(phone, text);
+        if (!sent) {
+            res.status(502).json({ error: 'WhatsApp did not accept the message. If the customer last wrote more than 24 hours ago, WhatsApp only allows replies once they message again.' });
+            return;
+        }
+
+        const message = await ChatMessage.create({ phone_number: phone, direction: 'out', text, sent_by: res.locals.user?.name || '' });
+        // Keep the chat open while the team is replying
+        const session = await Session.findOne({ phone_number: phone });
+        if (session) await session.save();
+
+        res.json({ success: true, message });
+    } catch (error) {
+        console.error('Inbox reply error:', error);
+        res.status(500).json({ error: 'Failed to send the reply' });
+    }
+});
+
+// Done chatting: the bot answers this customer again
+router.post('/inbox/:phone/close', requireAdmin, async (req, res) => {
+    try {
+        const session = await Session.findOne({ phone_number: param(req.params.phone) });
+        if (session && session.current_step === 'talking_to_staff') {
+            session.current_step = 'start';
+            await session.save();
+        }
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to close the chat' });
+    }
+});
+
+// Photos, voice notes and PDFs customers sent. Only types that can't run scripts are passed through.
+const SAFE_MEDIA_TYPES = /^(image\/(jpeg|png|webp|gif)|audio\/[\w.+-]+|video\/(mp4|3gpp)|application\/pdf)(;.*)?$/;
+
+router.get('/media/:mediaId', requireAdmin, async (req, res) => {
+    try {
+        const mediaId = param(req.params.mediaId);
+        if (!/^\d+$/.test(mediaId)) {
+            res.status(400).json({ error: 'Invalid media id' });
+            return;
+        }
+        const media = await whatsappService.downloadMedia(mediaId);
+        if (!media) {
+            res.status(404).json({ error: 'This file is no longer available on WhatsApp.' });
+            return;
+        }
+        if (!SAFE_MEDIA_TYPES.test(media.mimeType)) {
+            res.status(415).json({ error: 'This file type can only be opened on the phone.' });
+            return;
+        }
+        res.setHeader('Content-Type', media.mimeType);
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('Cache-Control', 'private, max-age=86400');
+        res.send(media.data);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to load the file' });
+    }
+});
+
+// ===== ONLINE STORE (what the bot shows customers) =====
+router.get('/catalog', requireAdmin, async (req, res) => {
+    try {
+        if (req.query.refresh) clearCatalogCache();
+        res.json({
+            configured: isCatalogConfigured(),
+            websiteUrl: process.env.WEBSITE_URL || '',
+            products: await getProducts()
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to load the collection' });
+    }
+});
+
 // ===== LEADS =====
-import { Lead } from '../models/Lead';
 
 // Get all leads (registered first, then unregistered)
-router.get('/leads', async (req, res) => {
+router.get('/leads', requireAdmin, async (req, res) => {
     try {
         const leads = await Lead.find().sort({ type: 1, last_active: -1 });
         res.json(leads);
@@ -266,12 +444,9 @@ router.get('/leads', async (req, res) => {
 });
 
 // ===== CSV IMPORT =====
-import multer from 'multer';
-import { parse } from 'csv-parse/sync';
-
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
-router.post('/leads/import', upload.single('csvFile'), async (req, res) => {
+router.post('/leads/import', requireAdmin, upload.single('csvFile'), async (req, res) => {
     try {
         if (!req.file) {
             res.status(400).json({ error: 'No CSV file uploaded' });
@@ -367,7 +542,7 @@ router.post('/leads/import', upload.single('csvFile'), async (req, res) => {
 });
 
 // ===== BROADCASTING =====
-router.post('/broadcast', upload.single('mediaFile'), async (req, res) => {
+router.post('/broadcast', requireAdmin, upload.single('mediaFile'), async (req, res) => {
     try {
         const { message, targetType } = req.body; // targetType: 'all', 'registered', 'unregistered'
 
@@ -415,8 +590,8 @@ router.post('/broadcast', upload.single('mediaFile'), async (req, res) => {
                     await whatsappService.sendVideo(lead.phone_number, mediaId, personalizedMessage);
                 } else if (mediaId && mediaType === 'document') {
                     await whatsappService.sendDocument(lead.phone_number, mediaId, req.file!.originalname, personalizedMessage);
-                } else {
-                    await whatsappService.sendText(lead.phone_number, personalizedMessage);
+                } else if (!(await whatsappService.sendText(lead.phone_number, personalizedMessage))) {
+                    throw new Error('WhatsApp did not accept the message');
                 }
                 sent++;
                 // Small delay to avoid rate limiting
@@ -437,9 +612,9 @@ router.post('/broadcast', upload.single('mediaFile'), async (req, res) => {
 // ===== DELETE LEADS =====
 
 // Delete leads in bulk by source or type (must be before :id route)
-router.delete('/leads/bulk/:filter', async (req, res) => {
+router.delete('/leads/bulk/:filter', requireAdmin, async (req, res) => {
     try {
-        const { filter } = req.params;
+        const filter = param(req.params.filter);
         let result;
         if (filter === 'csv') {
             result = await Lead.deleteMany({ source: 'csv_import' });
@@ -456,9 +631,9 @@ router.delete('/leads/bulk/:filter', async (req, res) => {
 });
 
 // Delete a single lead by ID
-router.delete('/leads/:id', async (req, res) => {
+router.delete('/leads/:id', requireAdmin, async (req, res) => {
     try {
-        await Lead.findByIdAndDelete(req.params.id);
+        await Lead.findByIdAndDelete(param(req.params.id));
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: 'Failed to delete lead' });
