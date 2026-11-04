@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { Admin } from '../models/Admin';
+import { staffExists } from '../db/staff';
 
 // Signs dashboard logins. Never fall back to a fixed string: this code is public,
 // so anyone could forge an admin login with it. Without JWT_SECRET a random secret
@@ -36,7 +36,7 @@ export async function activeUser(req: Request): Promise<StaffUser | null> {
     const user = readUser(req);
     if (!user) return null;
     try {
-        return (await Admin.exists({ _id: user.id })) ? user : null;
+        return (await staffExists(user.id)) ? user : null;
     } catch {
         return null;
     }

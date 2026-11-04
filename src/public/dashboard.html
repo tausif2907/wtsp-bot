@@ -1864,7 +1864,7 @@
                     <!-- Changed type from password to text to defeat Chrome Autofill -->
                     <input type="text" id="staffPassword" class="search-input" autocomplete="new-password"
                         style="width:100%; padding-right:40px; -webkit-text-security: disc;"
-                        placeholder="Minimum 6 characters">
+                        placeholder="At least 8 characters">
                     <button type="button" onclick="toggleStaffPassword()"
                         style="position:absolute; right:10px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:1.1rem; padding:0;">
                         <span id="staffEyeIcon">&#128065;</span>
@@ -2683,7 +2683,7 @@
                     <td>${typeBadge}</td>
                     <td>${l.source === 'csv_import' ? 'CSV Import' : 'WhatsApp'}</td>
                     <td>${esc(formatDate(l.last_active))}</td>
-                    <td><button class="action-btn" onclick="deleteLead(${arg(l._id)})" style="color:var(--danger);border-color:var(--danger);">Delete</button></td>
+                    <td><button class="action-btn" onclick="deleteLead(${arg(l.id)})" style="color:var(--danger);border-color:var(--danger);">Delete</button></td>
                 </tr>`;
             });
             html += '</tbody></table>';
@@ -2819,7 +2819,7 @@
             const password = document.getElementById('staffPassword').value;
 
             if (!name || !username || !password) return showToast('All fields required', 'error');
-            if (password.length < 6) return showToast('Password must be 6+ characters', 'error');
+            if (password.length < 8) return showToast('Password must be at least 8 characters', 'error');
 
             try {
                 await apiJson('/auth/signup', jsonBody('POST', { name, username, password, role: 'delivery' }));
@@ -2848,7 +2848,7 @@
                     <td><strong>${esc(s.name)}</strong></td>
                     <td>${esc(s.username || s.email)}</td>
                     <td>${esc(formatDate(s.created_at))}</td>
-                    <td><button class="action-btn" onclick="deleteStaff(${arg(s._id)})" style="color:var(--danger);border-color:var(--danger);">Revoke Access</button></td>
+                    <td><button class="action-btn" onclick="deleteStaff(${arg(s.id)})" style="color:var(--danger);border-color:var(--danger);">Revoke Access</button></td>
                 </tr>`;
             });
             html += '</tbody></table>';

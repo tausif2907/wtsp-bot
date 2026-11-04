@@ -38,6 +38,8 @@
     "moduleDetection": "force",
     "skipLibCheck": true
   },
+  // Only the bot itself; local one-off scripts in this folder aren't part of it
+  "include": ["src/**/*"],
   "exclude": [
     "tests/**/*",
     "**/*.test.ts",

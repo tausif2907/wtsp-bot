@@ -22,3 +22,6 @@ fix-indexes.ts
 reset-db.ts
 test_*.js
 test_*.ts
+
+# SQL with the bot's database password filled in
+*.local.sql

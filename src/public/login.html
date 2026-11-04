@@ -194,9 +194,24 @@
             display: none;
         }
 
-        /* Name field (only for signup) */
-        #nameGroup {
+        /* Fields only shown while creating the first admin account */
+        .setup-only {
             display: none;
+        }
+
+        .setup-mode .setup-only {
+            display: block;
+        }
+
+        .setup-note {
+            background: rgba(204, 153, 51, 0.1);
+            border: 1px solid rgba(204, 153, 51, 0.25);
+            border-radius: 8px;
+            padding: 0.65rem 0.9rem;
+            font-size: 0.78rem;
+            line-height: 1.5;
+            color: #e8d3a6;
+            margin-bottom: 1rem;
         }
 
         .show-password {
@@ -241,6 +256,16 @@
             <div class="success-msg" id="successMsg"></div>
 
             <form id="authForm" onsubmit="handleSubmit(event)">
+                <div class="setup-only setup-note">First-time setup: create the boutique's admin account. The setup
+                    code is shown in the window where the bot is running.</div>
+                <div class="form-group setup-only">
+                    <label for="setupCodeInput">Setup code</label>
+                    <input type="text" id="setupCodeInput" placeholder="e.g. 7KQM-4XPA" autocomplete="off">
+                </div>
+                <div class="form-group setup-only">
+                    <label for="nameInput">Your name</label>
+                    <input type="text" id="nameInput" placeholder="e.g. Rashmi" autocomplete="name">
+                </div>
                 <div class="form-group">
                     <label>Username</label>
                     <input type="text" id="usernameInput" placeholder="Enter username" required autocomplete="username">
@@ -249,6 +274,8 @@
                     <label>Password</label>
                     <input type="password" id="passwordInput" placeholder="Enter your password" required minlength="6"
                         autocomplete="current-password">
+                    <div class="setup-only" style="font-size:0.74rem;color:#a0a0b8;margin-top:0.4rem;">At least 8
+                        characters.</div>
                     <div class="show-password">
                         <input type="checkbox" id="showPasswordCheck" onchange="togglePasswordVisibility()">
                         <label for="showPasswordCheck">Show Password</label>
@@ -279,27 +306,46 @@
             document.getElementById('errorMsg').style.display = 'none';
         }
 
+        // While the bot's database has no admin yet, this page creates the first one
+        let setupMode = false;
+        const buttonLabel = () => (setupMode ? 'Create Admin Account' : 'Sign In');
+
+        function showSetup() {
+            setupMode = true;
+            document.getElementById('authForm').classList.add('setup-mode');
+            document.getElementById('formTitle').textContent = 'Set Up Your Dashboard';
+            document.getElementById('formSubtitle').textContent = 'Create the admin account for Rashmi Boutique';
+            document.getElementById('passwordInput').setAttribute('minlength', '8');
+            document.getElementById('passwordInput').setAttribute('autocomplete', 'new-password');
+            document.getElementById('setupCodeInput').required = true;
+            document.getElementById('nameInput').required = true;
+            document.getElementById('submitBtn').textContent = buttonLabel();
+        }
+
         async function handleSubmit(e) {
             e.preventDefault();
             const btn = document.getElementById('submitBtn');
             btn.disabled = true;
-            btn.textContent = 'Signing in...';
+            btn.textContent = setupMode ? 'Creating account...' : 'Signing in...';
 
             const username = document.getElementById('usernameInput').value.trim();
             const password = document.getElementById('passwordInput').value;
+            const body = setupMode
+                ? { username, password, name: document.getElementById('nameInput').value.trim(), setupCode: document.getElementById('setupCodeInput').value.trim() }
+                : { username, password };
 
             try {
-                const res = await fetch('/auth/login', {
+                const res = await fetch(setupMode ? '/auth/signup' : '/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
+                    body: JSON.stringify(body)
                 });
                 const data = await res.json();
 
                 if (!res.ok) {
                     showError(data.error || 'Something went wrong.');
                     btn.disabled = false;
-                    btn.textContent = 'Sign In';
+                    btn.textContent = buttonLabel();
                     return;
                 }
 
@@ -307,7 +353,7 @@
                 localStorage.setItem('admin_name', data.name);
                 localStorage.setItem('admin_role', data.role || 'admin');
 
-                showSuccess('Login successful! Redirecting...');
+                showSuccess(setupMode ? 'Admin account created! Opening your dashboard...' : 'Login successful! Redirecting...');
 
                 setTimeout(() => {
                     if (data.role === 'delivery') {
@@ -319,12 +365,21 @@
             } catch (err) {
                 showError('Network error. Please try again.');
                 btn.disabled = false;
-                btn.textContent = 'Sign In';
+                btn.textContent = buttonLabel();
             }
         }
 
         // Auto login if token exists and is valid
         window.onload = async () => {
+            try {
+                const setup = await (await fetch('/auth/setup')).json();
+                if (setup.needed) {
+                    localStorage.removeItem('admin_token');
+                    showSetup();
+                    return;
+                }
+            } catch (e) { }
+
             const token = localStorage.getItem('admin_token');
             if (token) {
                 try {

@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { parse } from 'csv-parse/sync';
-import { Customer } from '../models/Customer';
-import { Order } from '../models/Order';
-import { Lead } from '../models/Lead';
-import { Session } from '../models/Session';
-import { ChatMessage } from '../models/ChatMessage';
+import { listCustomers } from '../db/customers';
+import { listOrders, findOrder, setOrderStatus, updateOrder } from '../db/orders';
+import { listLeads, importLead, deleteLeads, deleteLead } from '../db/leads';
+import { loadSession, listOpenChats, touchSession, closeChat } from '../db/sessions';
+import { addChatMessage, lastMessageSince, lastCustomerMessage, recentMessages } from '../db/chats';
 import { whatsappService } from '../services/whatsapp';
 import { ORDER_STATUSES, STATUS_LABELS, shortOrderId, statusUpdateMessage, priceQuoteMessage } from '../services/orderUpdates';
 import { getProducts, getRating, syncCatalog, getCatalogStatus } from '../services/catalog';
@@ -28,7 +28,7 @@ const param = (value: string | string[] | undefined) => (Array.isArray(value) ? 
 // Get all customers
 router.get('/customers', requireAdmin, async (req, res) => {
     try {
-        const customers = await Customer.find().sort({ created_at: -1 });
+        const customers = await listCustomers();
         res.json(customers);
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch customers' });
@@ -38,7 +38,7 @@ router.get('/customers', requireAdmin, async (req, res) => {
 // Get all orders
 router.get('/orders', async (req, res) => {
     try {
-        const orders = await Order.find().sort({ created_at: -1 });
+        const orders = await listOrders();
         res.json(orders);
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch orders' });
@@ -56,11 +56,7 @@ router.patch('/orders/:orderId/status', async (req, res) => {
             return;
         }
 
-        const order = await Order.findOneAndUpdate(
-            { order_id: orderId },
-            { status },
-            { new: true }
-        );
+        const order = await setOrderStatus(param(orderId), status);
 
         if (!order) {
             res.status(404).json({ error: 'Order not found' });
@@ -78,27 +74,28 @@ router.patch('/orders/:orderId/status', async (req, res) => {
 // Set the price after measurement and keep the team's notes
 router.patch('/orders/:orderId', requireAdmin, async (req, res) => {
     try {
-        const order = await Order.findOne({ order_id: param(req.params.orderId) });
-        if (!order) {
+        const orderId = param(req.params.orderId);
+        const existing = await findOrder(orderId);
+        if (!existing) {
             res.status(404).json({ error: 'Order not found' });
             return;
         }
 
         const { price, notes, notify } = req.body;
-        const priceChanged = price !== undefined && Number(price) !== order.price;
-
+        const changes: { price?: number; notes?: string } = {};
         if (price !== undefined) {
             const amount = Number(price);
             if (!Number.isFinite(amount) || amount < 0 || amount > 10000000) {
                 res.status(400).json({ error: 'Please enter a valid price.' });
                 return;
             }
-            order.price = Math.round(amount);
+            changes.price = Math.round(amount);
         }
         if (notes !== undefined) {
-            order.notes = String(notes).slice(0, 5000);
+            changes.notes = String(notes).slice(0, 5000);
         }
-        await order.save();
+        const priceChanged = changes.price !== undefined && changes.price !== existing.price;
+        const order = (await updateOrder(orderId, changes)) || existing;
 
         let notified = false;
         if (notify && priceChanged && order.price > 0) {
@@ -115,7 +112,7 @@ router.patch('/orders/:orderId', requireAdmin, async (req, res) => {
 // Analytics — service popularity
 router.get('/analytics', requireAdmin, async (req, res) => {
     try {
-        const orders = await Order.find();
+        const orders = await listOrders();
         const serviceCounts: Record<string, number> = {};
         const statusCounts: Record<string, number> = {};
         const appointmentCounts: Record<string, number> = { visit: 0, pickup: 0 };
@@ -157,7 +154,7 @@ router.get('/analytics', requireAdmin, async (req, res) => {
 router.get('/orders/:orderId/invoice', async (req, res) => {
     try {
         const { orderId } = req.params;
-        const order = await Order.findOne({ order_id: orderId });
+        const order = await findOrder(param(orderId));
 
         if (!order) {
             res.status(404).json({ error: 'Order not found' });
@@ -167,7 +164,7 @@ router.get('/orders/:orderId/invoice', async (req, res) => {
         const mapUrl = order.latitude && order.longitude ? `https://www.google.com/maps?q=${order.latitude},${order.longitude}` : STORE.mapsLink;
         const statusLabel = STATUS_LABELS[order.status] || order.status;
 
-        let html = await generateInvoiceHtml(order.toObject(), statusLabel, mapUrl);
+        let html = await generateInvoiceHtml(order, statusLabel, mapUrl);
         // Add the print button for the dashboard view
         html += `
 <div class="no-print" style="text-align:center; margin-top:20px; padding-bottom: 40px;">
@@ -188,7 +185,7 @@ router.get('/orders/:orderId/invoice', async (req, res) => {
 router.get('/orders/:orderId/receipt', async (req, res) => {
     try {
         const { orderId } = req.params;
-        const order = await Order.findOne({ order_id: orderId });
+        const order = await findOrder(param(orderId));
 
         if (!order) {
             res.status(404).json({ error: 'Order not found' });
@@ -294,12 +291,12 @@ router.get('/orders/:orderId/receipt', async (req, res) => {
 // Open chats, newest activity first
 router.get('/inbox', requireAdmin, async (req, res) => {
     try {
-        const sessions = await Session.find({ current_step: 'talking_to_staff' }).sort({ updated_at: -1 });
+        const sessions = await listOpenChats();
         const chats = await Promise.all(sessions.map(async session => {
-            const since = session.handoff_at || session.updated_at;
+            const since = session.handoff_at || session.updated_at || new Date();
             const [last, lastIn] = await Promise.all([
-                ChatMessage.findOne({ phone_number: session.phone_number, created_at: { $gte: since } }).sort({ created_at: -1 }),
-                ChatMessage.findOne({ phone_number: session.phone_number, direction: 'in' }).sort({ created_at: -1 })
+                lastMessageSince(session.phone_number, since),
+                lastCustomerMessage(session.phone_number)
             ]);
             return {
                 phone: session.phone_number,
@@ -327,16 +324,13 @@ router.get('/inbox/:phone', requireAdmin, async (req, res) => {
             res.status(400).json({ error: 'Invalid phone number' });
             return;
         }
-        const [session, messages] = await Promise.all([
-            Session.findOne({ phone_number: phone }),
-            ChatMessage.find({ phone_number: phone }).sort({ created_at: -1 }).limit(100)
-        ]);
+        const [session, messages] = await Promise.all([loadSession(phone), recentMessages(phone, 100)]);
         res.json({
             phone,
             name: session?.name || '',
             topic: session?.handoff_topic || '',
             open: session?.current_step === 'talking_to_staff',
-            messages: messages.reverse()
+            messages
         });
     } catch (error) {
         res.status(500).json({ error: 'Failed to load the conversation' });
@@ -363,10 +357,9 @@ router.post('/inbox/:phone/reply', requireAdmin, async (req, res) => {
             return;
         }
 
-        const message = await ChatMessage.create({ phone_number: phone, direction: 'out', text, sent_by: res.locals.user?.name || '' });
+        const message = await addChatMessage({ phone_number: phone, direction: 'out', text, sent_by: res.locals.user?.name || '' });
         // Keep the chat open while the team is replying
-        const session = await Session.findOne({ phone_number: phone });
-        if (session) await session.save();
+        await touchSession(phone);
 
         res.json({ success: true, message });
     } catch (error) {
@@ -378,11 +371,7 @@ router.post('/inbox/:phone/reply', requireAdmin, async (req, res) => {
 // Done chatting: the bot answers this customer again
 router.post('/inbox/:phone/close', requireAdmin, async (req, res) => {
     try {
-        const session = await Session.findOne({ phone_number: param(req.params.phone) });
-        if (session && session.current_step === 'talking_to_staff') {
-            session.current_step = 'start';
-            await session.save();
-        }
+        await closeChat(param(req.params.phone));
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: 'Failed to close the chat' });
@@ -443,7 +432,7 @@ router.get('/catalog', requireAdmin, async (req, res) => {
 // Get all leads (registered first, then unregistered)
 router.get('/leads', requireAdmin, async (req, res) => {
     try {
-        const leads = await Lead.find().sort({ type: 1, last_active: -1 });
+        const leads = await listLeads();
         res.json(leads);
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch leads' });
@@ -525,19 +514,8 @@ router.post('/leads/import', requireAdmin, upload.single('csvFile'), async (req,
                 phoneVariants.push(phone.substring(2)); // without 91
             }
 
-            const existing = await Lead.findOne({ phone_number: { $in: phoneVariants } });
-            if (existing) {
-                // Update existing lead's phone to the 91-prefixed format
-                if (existing.phone_number !== phone) {
-                    existing.phone_number = phone;
-                }
-                if (name && !existing.name) existing.name = name;
-                await existing.save();
-                skipped++;
-            } else {
-                await Lead.create({ phone_number: phone, name, type: 'unregistered', source: 'csv_import', last_active: new Date() });
-                imported++;
-            }
+            if ((await importLead(phone, phoneVariants, name)) === 'imported') imported++;
+            else skipped++;
         }
 
         console.log(`CSV import complete: ${imported} imported, ${skipped} skipped, ${records.length} total`);
@@ -558,12 +536,7 @@ router.post('/broadcast', requireAdmin, upload.single('mediaFile'), async (req, 
             return;
         }
 
-        // Build lead filter
-        const filter: any = {};
-        if (targetType === 'registered') filter.type = 'registered';
-        else if (targetType === 'unregistered') filter.type = 'unregistered';
-
-        const leads = await Lead.find(filter);
+        const leads = await listLeads(targetType === 'registered' || targetType === 'unregistered' ? targetType : undefined);
 
         if (!leads.length) {
             res.status(400).json({ error: 'No leads found for the selected target' });
@@ -622,16 +595,16 @@ router.post('/broadcast', requireAdmin, upload.single('mediaFile'), async (req, 
 router.delete('/leads/bulk/:filter', requireAdmin, async (req, res) => {
     try {
         const filter = param(req.params.filter);
-        let result;
+        let deleted;
         if (filter === 'csv') {
-            result = await Lead.deleteMany({ source: 'csv_import' });
+            deleted = await deleteLeads({ source: 'csv_import' });
         } else if (filter === 'unregistered') {
-            result = await Lead.deleteMany({ type: 'unregistered' });
+            deleted = await deleteLeads({ type: 'unregistered' });
         } else {
             res.status(400).json({ error: 'Invalid filter. Use "csv" or "unregistered".' });
             return;
         }
-        res.json({ success: true, deleted: result.deletedCount });
+        res.json({ success: true, deleted });
     } catch (error) {
         res.status(500).json({ error: 'Failed to bulk delete leads' });
     }
@@ -640,7 +613,7 @@ router.delete('/leads/bulk/:filter', requireAdmin, async (req, res) => {
 // Delete a single lead by ID
 router.delete('/leads/:id', requireAdmin, async (req, res) => {
     try {
-        await Lead.findByIdAndDelete(param(req.params.id));
+        await deleteLead(param(req.params.id));
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: 'Failed to delete lead' });

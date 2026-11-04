@@ -1,8 +1,8 @@
-import { Session } from '../models/Session';
-import { Customer } from '../models/Customer';
-import { Order } from '../models/Order';
-import { Lead } from '../models/Lead';
-import { ChatMessage } from '../models/ChatMessage';
+import { loadSession, newSession, deleteSession } from '../db/sessions';
+import { upsertCustomer } from '../db/customers';
+import { createOrder, listOrdersFor } from '../db/orders';
+import { touchLead, findLeadName, saveLeadName, markLeadRegistered } from '../db/leads';
+import { addChatMessage } from '../db/chats';
 import { whatsappService } from './whatsapp';
 import { STATUS_LABELS, shortOrderId } from './orderUpdates';
 import { generateInvoiceHtml, generatePdfBuffer } from '../utils/pdfGenerator';
@@ -159,18 +159,14 @@ export class FlowController {
         const msgType = message.type;
 
         // Find or create session
-        let session = await Session.findOne({ phone_number: from });
+        let session: any = await loadSession(from);
         if (!session) {
-            session = new Session({ phone_number: from, current_step: 'start', cart: [] });
+            session = newSession(from);
             await session.save();
         }
 
-        // Upsert lead — track every contact who messages
-        await Lead.findOneAndUpdate(
-            { phone_number: from },
-            { $set: { last_active: new Date(), source: 'whatsapp' }, $setOnInsert: { name: '', type: 'unregistered', created_at: new Date() } },
-            { upsert: true, new: true }
-        );
+        // Track every contact who messages, for broadcasts
+        await touchLead(from);
 
         // Clear any existing follow-up timer for this user
         if (followUpTimers.has(from)) {
@@ -281,7 +277,7 @@ export class FlowController {
         const timer = setTimeout(async () => {
             try {
                 followUpTimers.delete(phone);
-                const session = await Session.findOne({ phone_number: phone });
+                const session = await loadSession(phone);
                 if (session && BOOKING_STEPS.includes(session.current_step)) {
                     let followUpMsg = `Your ${STORE.name} booking is still waiting for you 🌸\n\nSimply reply to continue where you left off, or type "Hi" to start fresh.`;
                     if (session.cart && session.cart.length > 0) {
@@ -302,9 +298,9 @@ export class FlowController {
         session.cart = [];
 
         // Check if we already have the lead's name
-        const lead = await Lead.findOne({ phone_number: from });
-        if (lead && lead.name) {
-            session.name = lead.name;
+        const knownName = await findLeadName(from);
+        if (knownName) {
+            session.name = knownName;
             await this.showMainMenu(from, session, true);
         } else {
             // Ask for name first
@@ -326,12 +322,8 @@ export class FlowController {
         const customerName = message.text.body.trim();
         session.name = customerName;
 
-        // Update the Lead record immediately
-        await Lead.findOneAndUpdate(
-            { phone_number: from },
-            { $set: { name: customerName, type: 'unregistered' } }, // Remains unregistered until order confirmed
-            { upsert: true }
-        );
+        // Saved straight away; the contact stays unregistered until a booking is confirmed
+        await saveLeadName(from, customerName);
 
         await this.showMainMenu(from, session, false);
     }
@@ -423,7 +415,7 @@ export class FlowController {
         session.current_step = 'main_menu';
         await session.save();
 
-        const orders = await Order.find({ customer_phone: from }).sort({ created_at: -1 }).limit(5);
+        const orders = await listOrdersFor(from, 5);
         if (orders.length === 0) {
             await whatsappService.sendInteractiveButtons(from, `You have no bookings with us yet 🌸\n\nWould you like to book a stitching appointment?`, [
                 { id: 'menu_book', title: 'Book Stitching' },
@@ -475,7 +467,7 @@ export class FlowController {
             ? `📍 Shared a location: https://www.google.com/maps?q=${message.location.latitude},${message.location.longitude}`
             : message.text?.body ?? message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? media?.caption ?? '';
 
-        await ChatMessage.create({
+        await addChatMessage({
             phone_number: from,
             direction: 'in',
             text,
@@ -883,12 +875,11 @@ export class FlowController {
             const mapUrl = isPickup ? `https://www.google.com/maps?q=${session.location_lat},${session.location_lng}` : STORE.mapsLink;
 
             // 1. Upsert Customer
-            await Customer.findOneAndUpdate(
-                { phone_number: from },
+            await upsertCustomer(
+                from,
                 isPickup
                     ? { name: session.name, location_lat: session.location_lat, location_lng: session.location_lng, address: session.address }
-                    : { name: session.name },
-                { upsert: true, new: true }
+                    : { name: session.name }
             );
 
             // 2. Create Order
@@ -900,13 +891,13 @@ export class FlowController {
                 booking_date: session.selected_date,
                 booking_time: session.selected_time,
                 appointment_day: session.selected_day,
-                appointment_type: isPickup ? 'pickup' : 'visit',
+                appointment_type: isPickup ? 'pickup' as const : 'visit' as const,
                 ...(isPickup ? { latitude: session.location_lat, longitude: session.location_lng, address: session.address } : {}),
                 price: totalPrice,
                 invoice_number: invoiceNumber,
                 status: 'order_received'
             };
-            await Order.create(orderData);
+            const order = await createOrder(orderData);
 
             // 3. Send booking slip to customer
             await whatsappService.sendText(from, formatBookingSlip(orderData));
@@ -922,7 +913,7 @@ export class FlowController {
 
             // 5. Send PDF booking slip
             try {
-                const html = await generateInvoiceHtml(orderData, STATUS_LABELS.order_received || 'Booked', mapUrl);
+                const html = await generateInvoiceHtml(order, STATUS_LABELS.order_received || 'Booked', mapUrl);
                 const pdfBuffer = await generatePdfBuffer(html);
                 const fileName = `${STORE.name.replace(/\s+/g, '_')}_${invoiceNumber}.pdf`;
                 const mediaId = await whatsappService.uploadMedia(pdfBuffer, 'application/pdf', fileName);
@@ -958,17 +949,14 @@ export class FlowController {
             }
 
             // 7. Update Lead to registered
-            await Lead.findOneAndUpdate(
-                { phone_number: from },
-                { type: 'registered', name: session.name }
-            );
+            await markLeadRegistered(from, session.name);
 
             // 8. Reset Session
             if (followUpTimers.has(from)) {
                 clearTimeout(followUpTimers.get(from)!);
                 followUpTimers.delete(from);
             }
-            await Session.deleteOne({ phone_number: from });
+            await deleteSession(from);
         }
     }
 }

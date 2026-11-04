@@ -1,61 +1,105 @@
 import { Router } from 'express';
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
-import { Admin } from '../models/Admin';
+import {
+    countAdmins, createStaff, findStaffForLogin, findStaffWithHash, listDeliveryStaff, removeDeliveryStaff,
+    setStaffPassword, checkPassword, UsernameTakenError, StaffMember
+} from '../db/staff';
 import { JWT_SECRET, requireAdmin, requireStaff, activeUser, loginLockedFor, recordLogin } from '../middleware/auth';
 
 const router = Router();
 
-// Signup (Also used to create staff by Admins)
+const MIN_PASSWORD = 8;
+
+const signIn = (account: StaffMember) => ({
+    token: jwt.sign({ id: account.id, username: account.username, name: account.name, role: account.role }, JWT_SECRET, { expiresIn: '7d' }),
+    name: account.name,
+    username: account.username,
+    role: account.role
+});
+
+// ---------------------------------------------------------------- first-time setup
+// While there is no admin yet, the first one is created on the login page with a one-time code
+// that only appears in the server's console, so nobody who merely finds the link can claim the account.
+
+let setupCode: string | null = null;
+let wrongSetupCodes = 0;
+
+function newSetupCode(): string {
+    const letters = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    const code = Array.from({ length: 8 }, () => letters[crypto.randomInt(letters.length)]).join('');
+    setupCode = `${code.slice(0, 4)}-${code.slice(4)}`;
+    wrongSetupCodes = 0;
+    console.log(`\nNo admin account yet. Open the dashboard login page and create one with setup code: ${setupCode}\n`);
+    return setupCode;
+}
+
+/** Prints a setup code when the database has no admin yet. */
+export async function announceSetupIfNeeded() {
+    if ((await countAdmins()) === 0 && !setupCode) newSetupCode();
+}
+
+function setupCodeMatches(candidate: unknown): boolean {
+    if (!setupCode) newSetupCode();
+    const given = Buffer.from(String(candidate || '').trim().toUpperCase());
+    const expected = Buffer.from(setupCode as string);
+    const ok = given.length === expected.length && crypto.timingSafeEqual(given, expected);
+    // Guessing is pointless: after 10 wrong codes a new one is printed
+    if (!ok && ++wrongSetupCodes >= 10) newSetupCode();
+    return ok;
+}
+
+// The login page asks whether to show the setup form
+router.get('/setup', async (req, res) => {
+    try {
+        res.json({ needed: (await countAdmins()) === 0 });
+    } catch (error) {
+        res.status(500).json({ error: 'Could not reach the database.' });
+    }
+});
+
+// Signup: the first admin (with the setup code), or delivery staff created by an admin
 router.post('/signup', async (req, res) => {
     try {
-        // SECURITY GATE: Prevent unauthorized account creation
-        const adminCount = await Admin.countDocuments({ role: 'admin' });
-        const isFirstAdmin = adminCount === 0;
+        const isFirstAdmin = (await countAdmins()) === 0;
+        let role: 'admin' | 'delivery' = 'delivery';
 
-        if (!isFirstAdmin) {
-            // Require a valid Admin JWT token to create any new accounts
-            const authHeader = req.headers.authorization;
-            if (!authHeader || !authHeader.startsWith('Bearer ')) {
-                return res.status(401).json({ error: 'Unauthorized: Admin login required to create accounts.' });
+        if (isFirstAdmin) {
+            if (!setupCodeMatches(req.body.setupCode)) {
+                return res.status(403).json({ error: 'That setup code is not right. Use the code shown in the bot\'s console window.' });
             }
+            role = 'admin';
+        } else {
             const creator = await activeUser(req);
             if (!creator) {
-                return res.status(401).json({ error: 'Unauthorized: Invalid or expired admin token.' });
+                return res.status(401).json({ error: 'Unauthorized: Admin login required to create accounts.' });
             }
             if (creator.role !== 'admin') {
                 return res.status(403).json({ error: 'Forbidden: Only administrators can create staff accounts.' });
             }
-
-            // Lock down role creation
             if (req.body.role === 'admin') {
                 return res.status(403).json({ error: 'Forbidden: Cannot create additional administrator accounts.' });
             }
         }
 
-        const { name, username, password, role } = req.body;
-
+        const { name, username, password } = req.body;
         if (!name || !username || !password) {
             return res.status(400).json({ error: 'All fields are required.' });
         }
-
-        if (password.length < 6) {
-            return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+        if (String(password).length < MIN_PASSWORD) {
+            return res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD} characters.` });
         }
 
-        const existing = await Admin.findOne({ username });
-        if (existing) {
-            return res.status(400).json({ error: 'An account with this username already exists.' });
+        const account = await createStaff({ name: String(name), username: String(username), password: String(password), role });
+        if (isFirstAdmin) {
+            setupCode = null;
+            console.log(`Admin account "${account.username}" created.`);
         }
 
-        const admin = new Admin({ name, username, password, role: role || 'admin' });
-        await admin.save();
-
-        const token = jwt.sign({ id: admin._id, username: admin.username, name: admin.name, role: admin.role }, JWT_SECRET, { expiresIn: '7d' });
-
-        res.status(201).json({ token, name: admin.name, username: admin.username, role: admin.role });
+        res.status(201).json(signIn(account));
     } catch (error: any) {
+        if (error instanceof UsernameTakenError) return res.status(400).json({ error: error.message });
         console.error('Signup error:', error);
-        require('fs').appendFileSync('signup-error.log', JSON.stringify({ message: error.message, stack: error.stack }) + '\n');
         res.status(500).json({ error: 'Failed to create account.' });
     }
 });
@@ -75,16 +119,14 @@ router.post('/login', async (req, res) => {
             return res.status(429).json({ error: `Too many wrong passwords. Please try again in ${lockedMinutes} minute${lockedMinutes === 1 ? '' : 's'}.` });
         }
 
-        const admin = await Admin.findOne({ username: String(username) });
-        const isMatch = admin ? await (admin as any).comparePassword(String(password)) : false;
+        const account = await findStaffForLogin(String(username));
+        const isMatch = account ? await checkPassword(account, String(password)) : false;
         recordLogin(req, String(username), isMatch);
-        if (!admin || !isMatch) {
+        if (!account || !isMatch) {
             return res.status(401).json({ error: 'Invalid username or password.' });
         }
 
-        const token = jwt.sign({ id: admin._id, username: admin.username, name: admin.name, role: (admin as any).role }, JWT_SECRET, { expiresIn: '7d' });
-
-        res.json({ token, name: admin.name, username: admin.username, role: (admin as any).role });
+        res.json(signIn(account));
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({ error: 'Login failed.' });
@@ -102,17 +144,16 @@ router.get('/verify', async (req, res) => {
 router.post('/password', requireStaff, async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
-        if (typeof newPassword !== 'string' || newPassword.length < 8) {
-            return res.status(400).json({ error: 'The new password needs at least 8 characters.' });
+        if (typeof newPassword !== 'string' || newPassword.length < MIN_PASSWORD) {
+            return res.status(400).json({ error: `The new password needs at least ${MIN_PASSWORD} characters.` });
         }
 
-        const admin = await Admin.findById(res.locals.user.id);
-        if (!admin || !(await (admin as any).comparePassword(String(currentPassword || '')))) {
+        const account = await findStaffWithHash(res.locals.user.id);
+        if (!account || !(await checkPassword(account, String(currentPassword || '')))) {
             return res.status(400).json({ error: 'Your current password is not right.' });
         }
 
-        admin.password = newPassword; // hashed by the model before saving
-        await admin.save();
+        await setStaffPassword(account.id, newPassword);
         res.json({ success: true });
     } catch (error) {
         console.error('Change password error:', error);
@@ -123,8 +164,7 @@ router.post('/password', requireStaff, async (req, res) => {
 // Get delivery staff list
 router.get('/staff', requireAdmin, async (req, res) => {
     try {
-        const staff = await Admin.find({ role: 'delivery' }).select('-password -__v');
-        res.json(staff);
+        res.json(await listDeliveryStaff());
     } catch (error) {
         console.error('Fetch staff error:', error);
         res.status(500).json({ error: 'Failed to fetch staff.' });
@@ -134,10 +174,8 @@ router.get('/staff', requireAdmin, async (req, res) => {
 // Delete a staff member
 router.delete('/staff/:id', requireAdmin, async (req, res) => {
     try {
-        const { id } = req.params;
-        const result = await Admin.findOneAndDelete({ _id: id, role: 'delivery' });
-
-        if (!result) {
+        const removed = await removeDeliveryStaff(String(req.params.id));
+        if (!removed) {
             return res.status(404).json({ error: 'Staff account not found or cannot be deleted.' });
         }
         res.json({ success: true, message: 'Staff deleted successfully.' });
