@@ -1508,6 +1508,7 @@
                     <div class="dot"></div><span>System Active</span>
                 </div>
                 <button class="icon-btn" id="themeToggle" onclick="toggleTheme()" title="Toggle Theme">&#9790;</button>
+                <button class="refresh-btn" onclick="openPasswordModal()" title="Change your password">Password</button>
                 <button class="logout-btn" onclick="handleLogout()">Logout</button>
             </div>
         </div>
@@ -1663,6 +1664,7 @@
                         <button class="refresh-btn" onclick="loadCatalog(true)">Refresh from website</button>
                     </div>
                 </div>
+                <div class="chip-row" id="catalogStatus" style="font-size:0.78rem;"></div>
                 <div id="catalogBody">
                     <div class="loading"><div class="spinner"></div></div>
                 </div>
@@ -1900,6 +1902,30 @@
         </div>
     </div>
 
+    <!-- Change Password Modal -->
+    <div id="passwordModal" class="modal-backdrop">
+        <div class="modal">
+            <h3>Change Password</h3>
+            <div class="modal-sub">Use at least 8 characters. Other devices stay signed in until their login expires.</div>
+            <div class="field">
+                <label for="pwCurrent">Current password</label>
+                <input type="password" id="pwCurrent" autocomplete="current-password">
+            </div>
+            <div class="field">
+                <label for="pwNew">New password</label>
+                <input type="password" id="pwNew" autocomplete="new-password">
+            </div>
+            <div class="field">
+                <label for="pwRepeat">New password again</label>
+                <input type="password" id="pwRepeat" autocomplete="new-password">
+            </div>
+            <div class="modal-actions">
+                <button class="refresh-btn" onclick="closePasswordModal()">Cancel</button>
+                <button class="refresh-btn btn-primary" id="pwSave" onclick="changePassword()">Change Password</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast -->
     <div class="toast" id="toast"></div>
 
@@ -2001,6 +2027,21 @@
             const m = /^(\d{1,2}):\d{2} (AM|PM)/.exec(o.booking_time || '');
             return m ? (Number(m[1]) % 12) + (m[2] === 'PM' ? 12 : 0) : 99;
         }
+        // Bookings made before appointment_day was saved only have a label like "Tomorrow, Wed, 4 Nov"
+        const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        function dayFromLabel(o) {
+            const label = o.booking_date || '';
+            const booked = new Date(new Date(o.created_at).getTime() + 5.5 * 3600e3); // India time
+            const iso = t => new Date(t).toISOString().slice(0, 10);
+            if (/^Today/.test(label)) return iso(booked);
+            if (/^Tomorrow/.test(label)) return iso(booked.getTime() + 864e5);
+            const m = /(\d{1,2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/.exec(label);
+            if (!m || isNaN(booked)) return '';
+            let day = Date.UTC(booked.getUTCFullYear(), MONTHS.indexOf(m[2]), Number(m[1]));
+            if (day < booked.getTime() - 864e5) day = Date.UTC(booked.getUTCFullYear() + 1, MONTHS.indexOf(m[2]), Number(m[1]));
+            return iso(day);
+        }
+
         const byDayAndSlot = (a, b) => (a.appointment_day || '').localeCompare(b.appointment_day || '') || slotHour(a) - slotHour(b);
 
         // ===== THEME =====
@@ -2496,40 +2537,48 @@
         }
 
         // ===== ONLINE COLLECTION =====
+        // The bot checks the website for changes every 30 seconds; this tab shows what it has right now
         async function loadCatalog(refresh) {
             const body = document.getElementById('catalogBody');
+            const status = document.getElementById('catalogStatus');
             if (refresh) body.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
             try {
                 const data = await apiJson('/api/catalog' + (refresh ? '?refresh=1' : ''));
                 if (!data.configured) {
+                    status.innerHTML = '';
                     body.innerHTML = '<div class="empty-state"><p>The online store is not connected. Add SUPABASE_URL and SUPABASE_ANON_KEY to the bot\'s .env file.</p></div>';
                     return;
                 }
+                status.innerHTML = data.error
+                    ? `<span class="badge cancelled">Can't reach the website</span><span class="muted">${esc(data.error)}. The bot keeps showing the last list it loaded${data.syncedAt ? ' (' + esc(timeAgo(data.syncedAt)) + ')' : ''}. If the Supabase project is paused, restore it at supabase.com.</span>`
+                    : `<span class="badge delivered">In sync with the website</span><span class="muted">Checked ${esc(timeAgo(data.checkedAt))} · ${data.products.length} product${data.products.length === 1 ? '' : 's'} · new or changed products reach the bot within 30 seconds</span>`;
                 if (!data.products.length) {
-                    body.innerHTML = '<div class="empty-state"><p>No published products found. Products published in the website admin show up here within 5 minutes.</p></div>';
+                    body.innerHTML = '<div class="empty-state"><p>No published products found. Products you publish in the website admin show up here and in the bot within 30 seconds.</p></div>';
                     return;
                 }
-                body.innerHTML = `<div class="catalog-grid">${data.products.map(p => productCard(p, data.websiteUrl)).join('')}</div>`;
+                body.innerHTML = `<div class="catalog-grid">${data.products.map(p => productCard(p, data.websiteUrl, (data.ratings || {})[p.id])).join('')}</div>`;
                 if (refresh) showToast('Collection refreshed from the website.');
             } catch (e) {
                 body.innerHTML = `<div class="empty-state"><p>${esc(e.message)}</p></div>`;
             }
         }
 
-        function productCard(p, site) {
+        function productCard(p, site, rating) {
             const sizes = p.is_sold_out ? [] : (p.sizes || []).filter(s => s.stock > 0).map(s => s.label);
             const available = !p.is_sold_out && (p.stitch_to_measure || sizes.length > 0);
-            const photo = (p.images || [])[0];
+            const photos = (p.images || []).filter(u => /^https:\/\//.test(u));
             const tags = [p.is_new_arrival && 'New arrival', p.is_bestseller && 'Bestseller'].filter(Boolean);
             const stitch = p.stitch_to_measure && !p.is_sold_out ? 'Stitch to measure +' + rupees(p.stitch_price) : '';
+            const extras = [photos.length > 1 ? photos.length + ' photos' : '', rating && rating.count ? `\u2b50 ${Number(rating.average).toFixed(1)} (${rating.count})` : ''].filter(Boolean);
             return `<div class="product-card">
-                ${photo && /^https:\/\//.test(photo) ? `<img class="photo" src="${esc(photo)}" alt="${esc(p.name)}" loading="lazy">` : '<div class="photo">No photo</div>'}
+                ${photos[0] ? `<img class="photo" src="${esc(photos[0])}" alt="${esc(p.name)}" loading="lazy">` : '<div class="photo">No photo</div>'}
                 <div class="product-body">
                     <div class="name">${esc(p.name)}</div>
-                    <div class="muted">${esc(p.category)}${tags.length ? ' · ' + esc(tags.join(', ')) : ''}</div>
+                    <div class="muted">${esc(p.category)}${tags.length ? ' \u00b7 ' + esc(tags.join(', ')) : ''}</div>
                     <div class="price">${rupees(p.price)}${p.mrp && p.mrp > p.price ? `<s>${rupees(p.mrp)}</s>` : ''}</div>
                     <div>${available ? '<span class="badge delivered">In stock</span>' : '<span class="badge cancelled">Sold out</span>'}</div>
-                    <div class="muted">${esc([sizes.length ? 'Sizes: ' + sizes.join(', ') : '', stitch].filter(Boolean).join(' · '))}</div>
+                    <div class="muted">${esc([sizes.length ? 'Sizes: ' + sizes.join(', ') : '', stitch].filter(Boolean).join(' \u00b7 '))}</div>
+                    ${extras.length ? `<div class="muted">${esc(extras.join(' \u00b7 '))}</div>` : ''}
                     ${site && p.slug ? `<a class="map-link" href="${esc(site.replace(/\/$/, '') + '/shop/' + encodeURIComponent(p.slug))}" target="_blank" rel="noopener">View on website</a>` : ''}
                 </div>
             </div>`;
@@ -2821,7 +2870,7 @@
         async function loadData() {
             try {
                 const [orders, customers] = await Promise.all([apiJson('/api/orders'), apiJson('/api/customers')]);
-                ordersData = orders;
+                ordersData = orders.map(o => o.appointment_day ? o : { ...o, appointment_day: dayFromLabel(o) });
                 customersData = customers;
                 // Don't redraw the table under someone who is choosing a status
                 const choosing = document.activeElement && document.activeElement.closest && document.activeElement.closest('#ordersTableBody select');
@@ -2832,8 +2881,36 @@
             } catch (e) { console.error('Load error:', e); }
         }
 
+        // ===== CHANGE PASSWORD =====
+        function openPasswordModal() {
+            ['pwCurrent', 'pwNew', 'pwRepeat'].forEach(id => { document.getElementById(id).value = ''; });
+            document.getElementById('passwordModal').style.display = 'flex';
+            document.getElementById('pwCurrent').focus();
+        }
+
+        function closePasswordModal() {
+            document.getElementById('passwordModal').style.display = 'none';
+        }
+
+        async function changePassword() {
+            const currentPassword = document.getElementById('pwCurrent').value;
+            const newPassword = document.getElementById('pwNew').value;
+            if (newPassword.length < 8) return showToast('The new password needs at least 8 characters.', 'error');
+            if (newPassword !== document.getElementById('pwRepeat').value) return showToast('The new passwords do not match.', 'error');
+            const btn = document.getElementById('pwSave');
+            btn.disabled = true;
+            try {
+                await apiJson('/auth/password', jsonBody('POST', { currentPassword, newPassword }));
+                showToast('Password changed.');
+                closePasswordModal();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+            btn.disabled = false;
+        }
+
         document.addEventListener('keydown', e => {
-            if (e.key === 'Escape') { closeOrderModal(); closeAddStaffModal(); }
+            if (e.key === 'Escape') { closeOrderModal(); closeAddStaffModal(); closePasswordModal(); }
         });
 
         // Open the tab used last time
@@ -2842,7 +2919,11 @@
         switchTab(TABS.includes(startTab) ? startTab : 'overview');
         loadData();
         if (startTab !== 'inbox') loadInbox();
-        setInterval(() => { loadData(); loadInbox(); }, 15000);
+        setInterval(() => {
+            loadData();
+            loadInbox();
+            if (currentTab === 'catalog') loadCatalog();
+        }, 15000);
     </script>
 </body>
 

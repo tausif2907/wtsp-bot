@@ -8,7 +8,7 @@ import { Session } from '../models/Session';
 import { ChatMessage } from '../models/ChatMessage';
 import { whatsappService } from '../services/whatsapp';
 import { ORDER_STATUSES, STATUS_LABELS, shortOrderId, statusUpdateMessage, priceQuoteMessage } from '../services/orderUpdates';
-import { getProducts, isCatalogConfigured, clearCatalogCache } from '../services/catalog';
+import { getProducts, getRating, syncCatalog, getCatalogStatus } from '../services/catalog';
 import { STORE, storeContactLines } from '../config/store';
 import { generateInvoiceHtml } from '../utils/pdfGenerator';
 import { escapeHtml as esc } from '../utils/html';
@@ -420,11 +420,18 @@ router.get('/media/:mediaId', requireAdmin, async (req, res) => {
 // ===== ONLINE STORE (what the bot shows customers) =====
 router.get('/catalog', requireAdmin, async (req, res) => {
     try {
-        if (req.query.refresh) clearCatalogCache();
+        if (req.query.refresh) await syncCatalog(true);
+        const products = await getProducts();
+        const ratings: Record<string, unknown> = {};
+        for (const p of products) {
+            const rating = await getRating(p.id);
+            if (rating) ratings[p.id] = rating;
+        }
         res.json({
-            configured: isCatalogConfigured(),
+            ...getCatalogStatus(),
             websiteUrl: process.env.WEBSITE_URL || '',
-            products: await getProducts()
+            products,
+            ratings
         });
     } catch (error) {
         res.status(500).json({ error: 'Failed to load the collection' });

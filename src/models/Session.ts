@@ -18,6 +18,7 @@ export interface ISession extends Document {
     address?: string;
     appointment_type?: string;
     browse_category?: string;
+    browse_page?: number;
     product_id?: string;
     handoff_at?: Date;
     handoff_topic?: string;
@@ -43,6 +44,7 @@ const sessionSchema = new Schema({
     address: { type: String, required: false },
     appointment_type: { type: String, required: false },
     browse_category: { type: String, required: false },
+    browse_page: { type: Number, required: false },
     product_id: { type: String, required: false },
     // Set when the customer asks to talk to the team; the chat then shows in the dashboard inbox
     handoff_at: { type: Date, required: false },

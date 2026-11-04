@@ -6,6 +6,9 @@ import authRoutes from './routes/authRoutes';
 
 const app = express();
 
+// The dashboard is reached through one proxy (ngrok); use its client address for the login limit
+app.set('trust proxy', 1);
+
 app.use(express.json());
 
 // Resolve the public directory path

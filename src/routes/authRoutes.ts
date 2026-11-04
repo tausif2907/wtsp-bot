@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import { Admin } from '../models/Admin';
-import { JWT_SECRET, requireAdmin } from '../middleware/auth';
+import { JWT_SECRET, requireAdmin, requireStaff, activeUser, loginLockedFor, recordLogin } from '../middleware/auth';
 
 const router = Router();
 
@@ -18,17 +18,12 @@ router.post('/signup', async (req, res) => {
             if (!authHeader || !authHeader.startsWith('Bearer ')) {
                 return res.status(401).json({ error: 'Unauthorized: Admin login required to create accounts.' });
             }
-            const token = authHeader.split(' ')[1];
-            if (!token) {
-                return res.status(401).json({ error: 'Unauthorized: Missing admin token.' });
-            }
-            try {
-                const decoded = jwt.verify(token, JWT_SECRET) as any;
-                if (decoded.role !== 'admin') {
-                    return res.status(403).json({ error: 'Forbidden: Only administrators can create staff accounts.' });
-                }
-            } catch (err) {
+            const creator = await activeUser(req);
+            if (!creator) {
                 return res.status(401).json({ error: 'Unauthorized: Invalid or expired admin token.' });
+            }
+            if (creator.role !== 'admin') {
+                return res.status(403).json({ error: 'Forbidden: Only administrators can create staff accounts.' });
             }
 
             // Lock down role creation
@@ -74,13 +69,16 @@ router.post('/login', async (req, res) => {
             return res.status(400).json({ error: 'Username and password are required.' });
         }
 
-        const admin = await Admin.findOne({ username });
-        if (!admin) {
-            return res.status(401).json({ error: 'Invalid username or password.' });
+        // The dashboard is reachable from the internet, so slow down password guessing
+        const lockedMinutes = loginLockedFor(req, String(username));
+        if (lockedMinutes) {
+            return res.status(429).json({ error: `Too many wrong passwords. Please try again in ${lockedMinutes} minute${lockedMinutes === 1 ? '' : 's'}.` });
         }
 
-        const isMatch = await (admin as any).comparePassword(password);
-        if (!isMatch) {
+        const admin = await Admin.findOne({ username: String(username) });
+        const isMatch = admin ? await (admin as any).comparePassword(String(password)) : false;
+        recordLogin(req, String(username), isMatch);
+        if (!admin || !isMatch) {
             return res.status(401).json({ error: 'Invalid username or password.' });
         }
 
@@ -93,23 +91,32 @@ router.post('/login', async (req, res) => {
     }
 });
 
-// Verify token
+// Verify token (and that the account hasn't been revoked)
 router.get('/verify', async (req, res) => {
+    const user = await activeUser(req);
+    if (!user) return res.status(401).json({ valid: false });
+    res.json({ valid: true, name: user.name, username: user.username, role: user.role });
+});
+
+// Change your own password
+router.post('/password', requireStaff, async (req, res) => {
     try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return res.status(401).json({ valid: false });
+        const { currentPassword, newPassword } = req.body;
+        if (typeof newPassword !== 'string' || newPassword.length < 8) {
+            return res.status(400).json({ error: 'The new password needs at least 8 characters.' });
         }
 
-        const token = authHeader.split(' ')[1];
-        if (!token) {
-            return res.status(401).json({ valid: false });
+        const admin = await Admin.findById(res.locals.user.id);
+        if (!admin || !(await (admin as any).comparePassword(String(currentPassword || '')))) {
+            return res.status(400).json({ error: 'Your current password is not right.' });
         }
 
-        const decoded = jwt.verify(token, JWT_SECRET) as any;
-        res.json({ valid: true, name: decoded.name, username: decoded.username, role: decoded.role });
+        admin.password = newPassword; // hashed by the model before saving
+        await admin.save();
+        res.json({ success: true });
     } catch (error) {
-        res.status(401).json({ valid: false });
+        console.error('Change password error:', error);
+        res.status(500).json({ error: 'Failed to change the password.' });
     }
 });
 

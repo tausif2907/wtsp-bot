@@ -7,7 +7,10 @@ import { whatsappService } from './whatsapp';
 import { STATUS_LABELS, shortOrderId } from './orderUpdates';
 import { generateInvoiceHtml, generatePdfBuffer } from '../utils/pdfGenerator';
 import { STORE, SERVICES, isOpenNow, upcomingOpenDays, slotsFor, storeContactLines, dayLabel } from '../config/store';
-import { getProducts, getProduct, getCategories, getAnnouncement, inStockSizes, isAvailable, formatPrice, productUrl, Product } from './catalog';
+import {
+    getProducts, getProduct, getRating, getAnnouncement, categoriesOf, collectionsOf, productsOn, shelfName, isShelfKey,
+    inStockSizes, isAvailable, formatPrice, productUrl, Product, Rating
+} from './catalog';
 import crypto from 'crypto';
 
 // Follow-up timers for abandoned bookings
@@ -26,6 +29,11 @@ const BOOKING_STEPS = [
 const MAX_LIST_ROWS = 10;
 const ROW_TITLE_MAX = 24;
 const ROW_DESC_MAX = 72;
+
+// A design list holds 10 rows: up to 8 designs, "More Designs" and the way back to the categories
+const PRODUCTS_PER_PAGE = 8;
+// Photos sent after "More Photos" (the first one is already on the product card)
+const MAX_EXTRA_PHOTOS = 4;
 
 const truncate = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
 
@@ -94,28 +102,44 @@ function formatBookingSlip(order: {
     ].join('\n');
 }
 
-function productCaption(p: Product): string {
+function productCaption(p: Product, rating?: Rating): string {
     const lines = [`*${p.name}*`];
 
     let price = formatPrice(p.price);
     if (p.mrp && p.mrp > p.price) {
         price += `  ~${formatPrice(p.mrp)}~  (${Math.round((1 - p.price / p.mrp) * 100)}% off)`;
     }
-    lines.push(price, '');
+    lines.push(price);
+    if (rating && rating.count > 0) lines.push(`⭐ ${rating.average.toFixed(1)} (${rating.count} review${rating.count === 1 ? '' : 's'})`);
+    lines.push('');
 
-    const details: [string, string][] = [['Fabric', p.fabric], ['Colour', p.colour], ['Work', p.work], ['Occasion', p.occasion]];
+    const details: [string, string][] = [
+        ['Fabric', p.fabric], ['Colour', p.colour], ['Work', p.work], ['Occasion', p.occasion],
+        ['Neckline', p.neckline], ['Sleeves', p.sleeves]
+    ];
     for (const [label, value] of details) if (value) lines.push(`${label}: ${value}`);
     if (p.description) lines.push('', truncate(p.description, 300));
+    if (p.model_info) lines.push(`_${p.model_info}_`);
     lines.push('');
 
     const sizes = inStockSizes(p);
     if (!isAvailable(p)) lines.push('❌ Currently sold out');
     else if (sizes.length > 0) lines.push(`✅ Sizes in stock: ${sizes.join(', ')}`);
-    if (!p.is_sold_out && p.stitch_to_measure) lines.push(`✂️ Can be stitched to your measurements (+${formatPrice(p.stitch_price)})`);
+    if (!p.is_sold_out && p.stitch_to_measure) lines.push(`✂️ Can be stitched to your measurements (+${formatPrice(p.stitch_price)}, made to order)`);
+    const returns = returnPolicyLine(p);
+    if (returns && isAvailable(p)) lines.push(returns);
 
     const url = productUrl(p);
     if (url) lines.push('', `🛍️ Order online: ${url}`);
     return truncate(lines.join('\n'), 1024);
+}
+
+// Same wording as RETURN_POLICIES in the website's src/lib/products.ts
+function returnPolicyLine(p: Product): string {
+    const days = STORE.returnWindowDays;
+    if (p.return_policy === 'exchange_refund') return `↩️ Exchange or refund within ${days} days (ready sizes)`;
+    if (p.return_policy === 'none') return '↩️ Not returnable';
+    return `↩️ Easy exchange within ${days} days (ready sizes)`;
 }
 
 function productRowDescription(p: Product): string {
@@ -239,10 +263,12 @@ export class FlowController {
 
         if (id.startsWith('menu_')) {
             await this.handleMainMenu(from, session, message);
-        } else if (id.startsWith('cat:')) {
+        } else if (isShelfKey(id)) {
             await this.handleCategorySelection(from, session, message);
-        } else if (id.startsWith('prod:') || id === 'back_categories') {
+        } else if (id.startsWith('prod:') || id.startsWith('more:') || id === 'back_categories') {
             await this.handleProductSelection(from, session, message);
+        } else if (id.startsWith('prod_') && session.product_id && session.current_step !== 'viewing_product') {
+            await this.handleProductAction(from, session, message);
         } else {
             return false;
         }
@@ -459,9 +485,12 @@ export class FlowController {
     }
 
     // ---------------------------------------------------------------- shop collection (from the website)
+    // Products come live from the website's database (see services/catalog.ts), so anything added,
+    // edited, sold out or removed in the website admin shows up here within 30 seconds.
 
     private async showCategories(from: string, session: any) {
-        const categories = await getCategories();
+        const products = await getProducts();
+        const categories = categoriesOf(products);
 
         if (categories.length === 0) {
             await whatsappService.sendText(
@@ -472,109 +501,157 @@ export class FlowController {
             return;
         }
 
-        const total = categories.reduce((s, c) => s + c.count, 0);
         session.current_step = 'browsing_categories';
         await session.save();
 
+        // New arrivals and offers first, then the website's categories
+        const rows = [...collectionsOf(products), ...categories].slice(0, MAX_LIST_ROWS).map(c => ({
+            id: c.key,
+            title: truncate(c.name, ROW_TITLE_MAX),
+            description: `${c.count} design${c.count === 1 ? '' : 's'}`
+        }));
+
         await whatsappService.sendInteractiveList(
             from,
-            `🛍️ *${STORE.name} Collection*\n\n${total} design${total === 1 ? '' : 's'} available. Which would you like to see?`,
-            {
-                buttonText: 'View Categories',
-                title: 'Categories',
-                rows: categories.slice(0, MAX_LIST_ROWS).map(c => ({
-                    id: `cat:${c.name}`,
-                    title: truncate(c.name, ROW_TITLE_MAX),
-                    description: `${c.count} design${c.count === 1 ? '' : 's'}`
-                }))
-            }
+            `🛍️ *${STORE.name} Collection*\n\n${products.length} design${products.length === 1 ? '' : 's'} available. Which would you like to see?`,
+            { buttonText: 'View Categories', title: 'Categories', rows }
         );
     }
 
     private async handleCategorySelection(from: string, session: any, message: any) {
-        const id = message.type === 'interactive' && message.interactive.type === 'list_reply' ? message.interactive.list_reply.id : '';
-        if (!id.startsWith('cat:')) {
+        const id = this.menuChoice(message) || '';
+        if (!isShelfKey(id)) {
             await this.showCategories(from, session);
             return;
         }
 
-        session.browse_category = id.slice(4);
-        await this.showProducts(from, session);
+        session.browse_category = id;
+        await this.showProducts(from, session, 0);
     }
 
-    private async showProducts(from: string, session: any) {
-        const products = (await getProducts()).filter(p => p.category === session.browse_category);
+    private async showProducts(from: string, session: any, page: number) {
+        // Older sessions saved the plain category name
+        const raw = session.browse_category || '';
+        const key = isShelfKey(raw) ? raw : `cat:${raw}`;
+        const products = productsOn(await getProducts(), key);
         if (products.length === 0) {
+            await whatsappService.sendText(from, 'Those designs are no longer in our collection. Here is what we have now 🌸');
             await this.showCategories(from, session);
             return;
         }
 
-        // Leave one row for going back to the categories
-        const shown = products.slice(0, MAX_LIST_ROWS - 1);
-        const site = process.env.WEBSITE_URL;
-        const moreNote = products.length > shown.length
-            ? `\n\nShowing the newest ${shown.length} of ${products.length}.${site ? ` See them all at ${site}/shop` : ''}`
-            : '';
+        const pages = Math.ceil(products.length / PRODUCTS_PER_PAGE);
+        const current = Math.min(Math.max(page, 0), pages - 1);
+        const start = current * PRODUCTS_PER_PAGE;
+        const shown = products.slice(start, start + PRODUCTS_PER_PAGE);
 
+        const rows = shown.map(p => ({ id: `prod:${p.id}`, title: truncate(p.name, ROW_TITLE_MAX), description: productRowDescription(p) }));
+        if (current < pages - 1) {
+            const nextEnd = Math.min(start + 2 * PRODUCTS_PER_PAGE, products.length);
+            rows.push({ id: `more:${current + 1}:${key}`, title: 'More Designs »', description: `Designs ${start + PRODUCTS_PER_PAGE + 1}–${nextEnd} of ${products.length}` });
+        }
+        rows.push({ id: 'back_categories', title: '« All Categories', description: 'Browse another category' });
+
+        session.browse_category = key;
+        session.browse_page = current;
         session.current_step = 'browsing_products';
         await session.save();
 
+        const name = shelfName(key);
+        const range = pages > 1 ? `\n\nShowing ${start + 1}–${start + shown.length} of ${products.length}, newest first.` : '';
         await whatsappService.sendInteractiveList(
             from,
-            `*${session.browse_category}*\n\nTap a design to see photos, sizes and price.${moreNote}`,
-            {
-                buttonText: 'View Designs',
-                title: truncate(session.browse_category, ROW_TITLE_MAX),
-                rows: [
-                    ...shown.map(p => ({ id: `prod:${p.id}`, title: truncate(p.name, ROW_TITLE_MAX), description: productRowDescription(p) })),
-                    { id: 'back_categories', title: '« All Categories', description: 'Browse another category' }
-                ]
-            }
+            `*${name}*\n\nTap a design to see photos, sizes and price.${range}`,
+            { buttonText: 'View Designs', title: truncate(name, ROW_TITLE_MAX), rows }
         );
     }
 
     private async handleProductSelection(from: string, session: any, message: any) {
-        const id = message.type === 'interactive' && message.interactive.type === 'list_reply' ? message.interactive.list_reply.id : '';
+        const id = this.menuChoice(message) || '';
 
         if (id === 'back_categories') {
             await this.showCategories(from, session);
             return;
         }
 
-        const product = id.startsWith('prod:') ? await getProduct(id.slice(5)) : undefined;
-        if (!product) {
-            await this.showProducts(from, session);
+        // "more:<page>:<shelf>" — the shelf is in the id, so a tap on an older list still opens the right one
+        if (id.startsWith('more:')) {
+            const [, page, ...shelf] = id.split(':');
+            session.browse_category = shelf.join(':');
+            await this.showProducts(from, session, Number(page) || 0);
             return;
         }
 
+        const product = id.startsWith('prod:') ? await getProduct(id.slice(5)) : undefined;
+        if (!product) {
+            if (id.startsWith('prod:')) {
+                await whatsappService.sendText(from, 'Sorry, that design is no longer in our collection. Here are the designs we have now 🌸');
+            }
+            await this.showProducts(from, session, session.browse_page || 0);
+            return;
+        }
+
+        await this.showProduct(from, session, product);
+    }
+
+    private async showProduct(from: string, session: any, product: Product) {
         session.product_id = product.id;
         session.current_step = 'viewing_product';
         await session.save();
 
+        const caption = productCaption(product, await getRating(product.id));
         const photo = product.images[0];
         if (photo) {
-            await whatsappService.sendImageLink(from, photo, productCaption(product));
+            await whatsappService.sendImageLink(from, photo, caption);
         } else {
-            await whatsappService.sendText(from, productCaption(product));
+            await whatsappService.sendText(from, caption);
         }
 
+        const extraPhotos = product.images.length - 1;
         await whatsappService.sendInteractiveButtons(from, 'Would you like to know more about this design?', [
             { id: 'prod_ask', title: 'Ask About This' },
-            { id: 'prod_more', title: 'More Designs' },
-            { id: 'prod_menu', title: 'Main Menu' }
+            extraPhotos > 0 ? { id: 'prod_photos', title: `More Photos (${extraPhotos})` } : { id: 'prod_menu', title: 'Main Menu' },
+            { id: 'prod_more', title: 'More Designs' }
         ]);
     }
 
     private async handleProductAction(from: string, session: any, message: any) {
-        const id = message.type === 'interactive' && message.interactive.type === 'button_reply' ? message.interactive.button_reply.id : '';
+        const id = this.menuChoice(message) || '';
 
         if (id === 'prod_ask') {
             await this.handOffToStaff(from, session, await getProduct(session.product_id));
+        } else if (id === 'prod_photos') {
+            await this.sendMorePhotos(from, session);
         } else if (id === 'prod_more') {
-            await this.showProducts(from, session);
+            await this.showProducts(from, session, session.browse_page || 0);
         } else {
             await this.showMainMenu(from, session, true);
         }
+    }
+
+    private async sendMorePhotos(from: string, session: any) {
+        const product = await getProduct(session.product_id);
+        if (!product) {
+            await whatsappService.sendText(from, 'Sorry, that design is no longer in our collection.');
+            await this.showCategories(from, session);
+            return;
+        }
+
+        const total = product.images.length;
+        const extra = product.images.slice(1, 1 + MAX_EXTRA_PHOTOS);
+        for (const [i, link] of extra.entries()) {
+            await whatsappService.sendImageLink(from, link, `${product.name} (${i + 2}/${total})`);
+        }
+
+        const url = productUrl(product);
+        const allPhotos = total > extra.length + 1 && url ? `\n\nSee all ${total} photos at ${url}` : '';
+        session.current_step = 'viewing_product';
+        await session.save();
+        await whatsappService.sendInteractiveButtons(from, `Like this design?${allPhotos}`, [
+            { id: 'prod_ask', title: 'Ask About This' },
+            { id: 'prod_more', title: 'More Designs' },
+            { id: 'prod_menu', title: 'Main Menu' }
+        ]);
     }
 
     // ---------------------------------------------------------------- stitching booking

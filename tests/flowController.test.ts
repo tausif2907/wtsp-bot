@@ -28,25 +28,34 @@ const PRODUCTS = [
     {
         id: 'p1', slug: 'maroon-raw-silk-blouse-ab12', name: 'Maroon Raw Silk Blouse', category: 'Blouses',
         price: 1499, mrp: 1999, description: 'Hand embroidered back', colour: 'Maroon', fabric: 'Raw silk', work: 'Zari',
-        occasion: 'Festive', images: ['https://example.supabase.co/storage/v1/object/public/product-images/a.jpg'],
+        occasion: 'Festive', neckline: 'Sweetheart', sleeves: '', model_info: '', size_notes: '', return_policy: 'exchange',
+        images: ['a.jpg', 'b.jpg', 'c.jpg'].map(f => `https://example.supabase.co/storage/v1/object/public/product-images/${f}`),
         sizes: [{ label: 'S', stock: 0 }, { label: 'M', stock: 2 }], is_sold_out: false, stitch_to_measure: true,
-        stitch_price: 500, is_new_arrival: true, is_bestseller: false
+        stitch_price: 500, is_new_arrival: true, is_bestseller: false, created_at: '2026-11-01T10:00:00Z'
     },
     {
         id: 'p2', slug: 'red-bridal-lehenga-cd34', name: 'Red Bridal Lehenga', category: 'Lehenga',
         price: 24999, mrp: null, description: '', colour: 'Red', fabric: 'Velvet', work: 'Zardozi', occasion: 'Bridal',
+        neckline: '', sleeves: '', model_info: '', size_notes: '', return_policy: 'none',
         images: [], sizes: [], is_sold_out: true, stitch_to_measure: false, stitch_price: 500,
-        is_new_arrival: false, is_bestseller: false
+        is_new_arrival: false, is_bestseller: false, created_at: '2026-10-01T10:00:00Z'
     }
 ];
+
+// What the website's database holds right now; tests add and remove products here
+let mockCatalog: any[] = [];
+
+const newBlouse = (n: number) => ({
+    ...PRODUCTS[0], id: `n${n}`, slug: `blouse-${n}`, name: `Blouse Design ${n}`, mrp: null, is_new_arrival: false, images: []
+});
 
 jest.mock('../src/services/catalog', () => {
     const actual = jest.requireActual('../src/services/catalog');
     return {
         ...actual,
-        getProducts: jest.fn(async () => PRODUCTS),
-        getProduct: jest.fn(async (id: string) => PRODUCTS.find(p => p.id === id)),
-        getCategories: jest.fn(async () => [{ name: 'Blouses', count: 1 }, { name: 'Lehenga', count: 1 }]),
+        getProducts: jest.fn(async () => mockCatalog),
+        getProduct: jest.fn(async (id: string) => mockCatalog.find(p => p.id === id)),
+        getRating: jest.fn(async (id: string) => (id === 'p1' ? { average: 4.5, count: 2 } : undefined)),
         getAnnouncement: jest.fn(async () => ({ enabled: true, text: 'Festive offer: 10% off blouses', link: '' }))
     };
 });
@@ -88,6 +97,7 @@ describe('Rashmi Boutique conversation flow', () => {
         jest.spyOn(Order, 'find').mockReturnValue({ sort: () => ({ limit: () => Promise.resolve(orders) }) } as any);
         jest.spyOn(ChatMessage, 'create').mockResolvedValue({} as any);
         orders = [];
+        mockCatalog = [...PRODUCTS];
     });
 
     afterEach(() => {
@@ -179,6 +189,95 @@ describe('Rashmi Boutique conversation flow', () => {
         await flowController.handleMessage(listItem('prod:p2'));
         expect(whatsappService.sendImageLink).not.toHaveBeenCalled();
         expect(lastCall(whatsappService.sendText)[1]).toContain('sold out');
+    });
+
+    it('lists new arrivals and offers first, then categories in the website order', async () => {
+        mockCatalog = [PRODUCTS[1], PRODUCTS[0]]; // newest product is a lehenga
+        leadName = 'Priya';
+        await flowController.handleMessage(text('Hi'));
+        await flowController.handleMessage(listItem('menu_shop'));
+
+        const rows = lastCall(whatsappService.sendInteractiveList)[2].rows;
+        expect(rows.map((r: any) => r.id)).toEqual(['col:new', 'col:sale', 'cat:Blouses', 'cat:Lehenga']);
+        expect(rows[1]).toMatchObject({ title: '🏷️ On Sale', description: '1 design' });
+
+        await flowController.handleMessage(listItem('col:sale', '🏷️ On Sale'));
+        expect(lastCall(whatsappService.sendInteractiveList)[2].rows[0].id).toBe('prod:p1');
+    });
+
+    it('shows a product added on the website the next time a customer browses', async () => {
+        leadName = 'Priya';
+        await flowController.handleMessage(text('Hi'));
+        await flowController.handleMessage(listItem('menu_shop'));
+        expect(lastCall(whatsappService.sendInteractiveList)[1]).toContain('2 designs available');
+
+        mockCatalog = [{ ...newBlouse(1), name: 'Ivory Chikankari Blouse' }, ...mockCatalog];
+        await flowController.handleMessage(listItem('cat:Blouses', 'Blouses'));
+
+        const rows = lastCall(whatsappService.sendInteractiveList)[2].rows;
+        expect(rows[0]).toMatchObject({ id: 'prod:n1', title: 'Ivory Chikankari Blouse' });
+        expect(rows.map((r: any) => r.id)).toContain('prod:p1');
+    });
+
+    it('pages through a category with more designs than one WhatsApp list holds', async () => {
+        mockCatalog = Array.from({ length: 12 }, (_, i) => newBlouse(i + 1));
+        leadName = 'Priya';
+        await flowController.handleMessage(text('Hi'));
+        await flowController.handleMessage(listItem('menu_shop'));
+        await flowController.handleMessage(listItem('cat:Blouses', 'Blouses'));
+
+        let [, body, list] = lastCall(whatsappService.sendInteractiveList);
+        expect(list.rows).toHaveLength(10);
+        expect(list.rows[8]).toMatchObject({ id: 'more:1:cat:Blouses', description: 'Designs 9–12 of 12' });
+        expect(list.rows[9].id).toBe('back_categories');
+        expect(body).toContain('Showing 1–8 of 12');
+
+        await flowController.handleMessage(listItem('more:1:cat:Blouses'));
+        [, body, list] = lastCall(whatsappService.sendInteractiveList);
+        expect(list.rows.map((r: any) => r.id)).toEqual(['prod:n9', 'prod:n10', 'prod:n11', 'prod:n12', 'back_categories']);
+        expect(body).toContain('Showing 9–12 of 12');
+
+        // "More Designs" on a product goes back to the page the customer was on
+        await flowController.handleMessage(listItem('prod:n10'));
+        await flowController.handleMessage(button('prod_more'));
+        expect(lastCall(whatsappService.sendInteractiveList)[2].rows[0].id).toBe('prod:n9');
+    });
+
+    it('shows the rating, neckline and return policy, and sends the other photos on request', async () => {
+        leadName = 'Priya';
+        await flowController.handleMessage(text('Hi'));
+        await flowController.handleMessage(listItem('menu_shop'));
+        await flowController.handleMessage(listItem('cat:Blouses', 'Blouses'));
+        await flowController.handleMessage(listItem('prod:p1'));
+
+        const caption = lastCall(whatsappService.sendImageLink)[2];
+        expect(caption).toContain('⭐ 4.5 (2 reviews)');
+        expect(caption).toContain('Neckline: Sweetheart');
+        expect(caption).toContain('Easy exchange within 3 days');
+        const buttons = lastCall(whatsappService.sendInteractiveButtons)[2];
+        expect(buttons.map((b: any) => b.id)).toEqual(['prod_ask', 'prod_photos', 'prod_more']);
+        expect(buttons[1].title).toBe('More Photos (2)');
+
+        (whatsappService.sendImageLink as jest.Mock).mockClear();
+        await flowController.handleMessage(button('prod_photos'));
+        const photos = (whatsappService.sendImageLink as jest.Mock).mock.calls;
+        expect(photos.map(c => c[1])).toEqual([expect.stringContaining('b.jpg'), expect.stringContaining('c.jpg')]);
+        expect(photos[1][2]).toBe('Maroon Raw Silk Blouse (3/3)');
+        expect(lastCall(whatsappService.sendInteractiveButtons)[2].map((b: any) => b.id)).toEqual(['prod_ask', 'prod_more', 'prod_menu']);
+    });
+
+    it('tells the customer when a design was removed from the website', async () => {
+        leadName = 'Priya';
+        await flowController.handleMessage(text('Hi'));
+        await flowController.handleMessage(listItem('menu_shop'));
+        await flowController.handleMessage(listItem('cat:Blouses', 'Blouses'));
+
+        mockCatalog = mockCatalog.filter(p => p.id !== 'p1');
+        await flowController.handleMessage(listItem('prod:p1'));
+
+        expect((whatsappService.sendText as jest.Mock).mock.calls.some(c => c[1].includes('no longer in our collection'))).toBe(true);
+        expect(whatsappService.sendImageLink).not.toHaveBeenCalled();
+        expect(stored.current_step).toBe('browsing_categories'); // the blouse shelf is empty now
     });
 
     it('stays quiet while the boutique team is chatting, until the customer says Hi', async () => {

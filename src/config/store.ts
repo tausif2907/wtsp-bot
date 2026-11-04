@@ -29,6 +29,9 @@ export const STORE = {
 
     invoicePrefix: 'RB',
 
+    // Same as RETURN_WINDOW_DAYS in the website's src/lib/store.ts
+    returnWindowDays: 3,
+
     // Website theme: gold, brown, cream
     colors: {
         primary: '#816031', // brown  hsl(35 45% 35%)

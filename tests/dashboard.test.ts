@@ -5,6 +5,7 @@ import { Order } from '../src/models/Order';
 import { Customer } from '../src/models/Customer';
 import { Session } from '../src/models/Session';
 import { ChatMessage } from '../src/models/ChatMessage';
+import { Admin } from '../src/models/Admin';
 import { whatsappService } from '../src/services/whatsapp';
 import { JWT_SECRET } from '../src/middleware/auth';
 
@@ -44,6 +45,8 @@ const sorted = (value: any) => ({ sort: () => Promise.resolve(value) }) as any;
 
 describe('Dashboard API', () => {
     beforeAll(() => jest.spyOn(console, 'log').mockImplementation(() => { }));
+    // Every token below belongs to an account that still exists, unless a test says otherwise
+    beforeEach(() => jest.spyOn(Admin, 'exists').mockResolvedValue({ _id: '1' } as any));
     afterEach(() => {
         jest.restoreAllMocks();
         jest.spyOn(console, 'log').mockImplementation(() => { });
@@ -185,5 +188,41 @@ describe('Dashboard API', () => {
         const ok = await request(app).get('/api/media/123').set('Authorization', ADMIN);
         expect(ok.status).toBe(200);
         expect(ok.headers['content-type']).toBe('image/jpeg');
+    });
+
+    it('locks out a revoked staff account straight away, not after its 7-day login runs out', async () => {
+        (Admin.exists as jest.Mock).mockResolvedValue(null);
+        expect((await request(app).get('/api/orders').set('Authorization', DELIVERY)).status).toBe(401);
+        expect((await request(app).get('/auth/verify').set('Authorization', DELIVERY)).status).toBe(401);
+    });
+
+    it('changes the password only when the current one is right', async () => {
+        const account = { password: 'old-hash', comparePassword: jest.fn(async (p: string) => p === 'old-password'), save: jest.fn() };
+        jest.spyOn(Admin, 'findById').mockResolvedValue(account as any);
+
+        const send = (body: object) => request(app).post('/auth/password').set('Authorization', ADMIN).send(body);
+        expect((await send({ currentPassword: 'guess', newPassword: 'new-password-1' })).status).toBe(400);
+        expect((await send({ currentPassword: 'old-password', newPassword: 'short' })).status).toBe(400);
+        expect(account.save).not.toHaveBeenCalled();
+
+        expect((await send({ currentPassword: 'old-password', newPassword: 'new-password-1' })).status).toBe(200);
+        expect(account.password).toBe('new-password-1'); // the model hashes it on save
+        expect(account.save).toHaveBeenCalled();
+    });
+
+    it('slows down password guessing on the login page', async () => {
+        jest.spyOn(Admin, 'findOne').mockResolvedValue(null);
+        const attempt = () => request(app).post('/auth/login').send({ username: 'owner-guess-test', password: 'wrong' });
+
+        for (let i = 0; i < 5; i++) expect((await attempt()).status).toBe(401);
+        const locked = await attempt();
+        expect(locked.status).toBe(429);
+        expect(locked.body.error).toContain('Too many wrong passwords');
+    });
+
+    it('reports whether the bot is in sync with the online store', async () => {
+        const res = await request(app).get('/api/catalog').set('Authorization', ADMIN);
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({ configured: false, products: [], error: '' });
     });
 });
