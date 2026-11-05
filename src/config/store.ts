@@ -32,11 +32,10 @@ export const STORE = {
     // Same as RETURN_WINDOW_DAYS in the website's src/lib/store.ts
     returnWindowDays: 3,
 
-    // Website theme: gold, brown, cream
+    // Invoice and printout colours (the dashboard sets its own in its CSS): deep teal on white
     colors: {
-        primary: '#816031', // brown  hsl(35 45% 35%)
-        accent: '#cc9933',  // gold   hsl(40 60% 50%)
-        soft: '#f6f3ee'     // cream  hsl(35 30% 95%)
+        primary: '#0f766e', // teal, readable with white text
+        soft: '#f0fdfa'     // pale teal panel
     }
 };
 

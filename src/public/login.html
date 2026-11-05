@@ -5,9 +5,47 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Login — Rashmi Boutique</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Fraunces:opsz,wght@9..144,600&display=swap"
         rel="stylesheet">
+    <script>
+        // Same light/dark choice as the dashboard: the saved one, else the computer's setting
+        try {
+            document.documentElement.setAttribute('data-theme', localStorage.getItem('dashboard-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'));
+        } catch (e) { }
+    </script>
     <style>
+        :root {
+            --bg: #0b0f14;
+            --card: #121a22;
+            --text: #e6edf3;
+            --text-secondary: #a3b1bf;
+            --muted: #7d8b99;
+            --border: rgba(255, 255, 255, 0.08);
+            --input-bg: rgba(255, 255, 255, 0.04);
+            --accent: #2dd4bf;
+            --on-accent: #042f2e;
+            --accent-glow: rgba(45, 212, 191, 0.16);
+            --danger: #f87171;
+            --success: #4ade80;
+            --shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+        }
+
+        [data-theme="light"] {
+            --bg: #f4f6f8;
+            --card: #ffffff;
+            --text: #101828;
+            --text-secondary: #475467;
+            --muted: #667085;
+            --border: #e4e7ec;
+            --input-bg: #f9fafb;
+            --accent: #0f766e;
+            --on-accent: #ffffff;
+            --accent-glow: rgba(15, 118, 110, 0.12);
+            --danger: #b42318;
+            --success: #067647;
+            --shadow: 0 12px 32px rgba(16, 24, 40, 0.08);
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -20,23 +58,19 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            background: #17120b;
-            color: #eaeaea;
-            overflow: hidden;
+            padding: 2rem 0;
+            background: var(--bg);
+            color: var(--text);
         }
 
-        /* Animated background */
+        /* A soft teal wash behind the card */
         body::before {
             content: '';
             position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: radial-gradient(ellipse at 20% 50%, rgba(233, 69, 96, 0.08) 0%, transparent 50%),
-                radial-gradient(ellipse at 80% 20%, rgba(0, 149, 255, 0.06) 0%, transparent 50%),
-                radial-gradient(ellipse at 50% 80%, rgba(139, 92, 246, 0.06) 0%, transparent 50%);
+            inset: 0;
+            background: radial-gradient(ellipse at 50% 0%, var(--accent-glow) 0%, transparent 60%);
             z-index: 0;
+            pointer-events: none;
         }
 
         .login-container {
@@ -44,108 +78,106 @@
             z-index: 1;
             width: 100%;
             max-width: 420px;
-            padding: 0 1.5rem;
+            padding: 0 1rem;
         }
 
         .login-card {
-            background: rgba(26, 26, 46, 0.85);
-            backdrop-filter: blur(24px);
-            border: 1px solid rgba(255, 255, 255, 0.06);
-            border-radius: 20px;
-            padding: 2.5rem;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 2.25rem;
+            box-shadow: var(--shadow);
         }
 
         .login-header {
             text-align: center;
-            margin-bottom: 2rem;
+            margin-bottom: 1.75rem;
         }
 
         .login-header .logo {
-            width: 56px;
-            height: 56px;
-            border-radius: 16px;
-            background: linear-gradient(135deg, #816031, #cc9933);
+            width: 54px;
+            height: 54px;
+            border-radius: 15px;
+            background: var(--accent);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1.5rem;
-            font-weight: 800;
-            color: #fff;
+            font-family: 'Fraunces', Georgia, serif;
+            font-size: 1.35rem;
+            font-weight: 600;
+            color: var(--on-accent);
             margin: 0 auto 1rem;
-            box-shadow: 0 8px 24px rgba(233, 69, 96, 0.3);
         }
 
         .login-header h1 {
-            font-size: 1.4rem;
-            font-weight: 700;
+            font-family: 'Fraunces', Georgia, serif;
+            font-size: 1.55rem;
+            font-weight: 600;
             margin-bottom: 0.35rem;
         }
 
         .login-header p {
-            font-size: 0.82rem;
-            color: #a0a0b8;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
         }
 
         .form-group {
-            margin-bottom: 1.25rem;
+            margin-bottom: 1.1rem;
         }
 
         .form-group label {
             display: block;
-            font-size: 0.72rem;
+            font-size: 0.74rem;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.06em;
-            color: #a0a0b8;
-            margin-bottom: 0.5rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.4rem;
         }
 
         .form-group input {
             width: 100%;
-            padding: 0.75rem 1rem;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 0.75rem 0.95rem;
+            background: var(--input-bg);
+            border: 1px solid var(--border);
             border-radius: 10px;
-            color: #eaeaea;
+            color: var(--text);
             font-family: 'Inter', sans-serif;
-            font-size: 0.88rem;
-            transition: border 0.2s, box-shadow 0.2s;
+            font-size: 0.9rem;
             outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
         }
 
         .form-group input:focus {
-            border-color: #cc9933;
-            box-shadow: 0 0 0 3px rgba(233, 69, 96, 0.15);
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
         }
 
         .form-group input::placeholder {
-            color: #6c6c8a;
+            color: var(--muted);
         }
 
         .submit-btn {
             width: 100%;
-            padding: 0.85rem;
-            background: linear-gradient(135deg, #816031, #a67c3d);
+            padding: 0.8rem;
+            background: var(--accent);
             border: none;
             border-radius: 10px;
-            color: #fff;
+            color: var(--on-accent);
             font-family: 'Inter', sans-serif;
-            font-size: 0.9rem;
+            font-size: 0.92rem;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.2s;
-            letter-spacing: 0.02em;
-            box-shadow: 0 4px 16px rgba(233, 69, 96, 0.3);
+            margin-top: 0.5rem;
+            transition: filter 0.2s, transform 0.1s;
         }
 
         .submit-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 6px 20px rgba(233, 69, 96, 0.4);
+            filter: brightness(1.08);
         }
 
         .submit-btn:active {
-            transform: translateY(0);
+            transform: translateY(1px);
         }
 
         .submit-btn:disabled {
@@ -158,11 +190,11 @@
             text-align: center;
             margin-top: 1.25rem;
             font-size: 0.82rem;
-            color: #a0a0b8;
+            color: var(--text-secondary);
         }
 
         .switch-mode a {
-            color: #cc9933;
+            color: var(--accent);
             cursor: pointer;
             font-weight: 600;
             text-decoration: none;
@@ -172,26 +204,25 @@
             text-decoration: underline;
         }
 
-        .error-msg {
-            background: rgba(233, 69, 96, 0.1);
-            border: 1px solid rgba(233, 69, 96, 0.2);
-            border-radius: 8px;
+        .error-msg,
+        .success-msg {
+            border-radius: 10px;
             padding: 0.65rem 0.9rem;
-            font-size: 0.8rem;
-            color: #e94560;
+            font-size: 0.82rem;
             margin-bottom: 1rem;
             display: none;
         }
 
+        .error-msg {
+            background: color-mix(in srgb, var(--danger) 10%, transparent);
+            border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+            color: var(--danger);
+        }
+
         .success-msg {
-            background: rgba(0, 214, 143, 0.1);
-            border: 1px solid rgba(0, 214, 143, 0.2);
-            border-radius: 8px;
-            padding: 0.65rem 0.9rem;
-            font-size: 0.8rem;
-            color: #00d68f;
-            margin-bottom: 1rem;
-            display: none;
+            background: color-mix(in srgb, var(--success) 10%, transparent);
+            border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
+            color: var(--success);
         }
 
         /* Fields only shown while creating the first admin account */
@@ -204,14 +235,14 @@
         }
 
         .setup-note {
-            background: rgba(204, 153, 51, 0.1);
-            border: 1px solid rgba(204, 153, 51, 0.25);
-            border-radius: 8px;
-            padding: 0.65rem 0.9rem;
-            font-size: 0.78rem;
+            background: var(--accent-glow);
+            border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+            border-radius: 10px;
+            padding: 0.7rem 0.9rem;
+            font-size: 0.8rem;
             line-height: 1.5;
-            color: #e8d3a6;
-            margin-bottom: 1rem;
+            color: var(--text);
+            margin-bottom: 1.1rem;
         }
 
         .show-password {
@@ -224,15 +255,15 @@
         .show-password input[type="checkbox"] {
             width: 14px;
             height: 14px;
-            accent-color: #cc9933;
+            accent-color: var(--accent);
             cursor: pointer;
             margin: 0;
             flex-shrink: 0;
         }
 
         .show-password label {
-            font-size: 0.78rem;
-            color: #a0a0b8;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
             cursor: pointer;
             user-select: none;
             text-transform: none;
@@ -274,7 +305,7 @@
                     <label>Password</label>
                     <input type="password" id="passwordInput" placeholder="Enter your password" required minlength="6"
                         autocomplete="current-password">
-                    <div class="setup-only" style="font-size:0.74rem;color:#a0a0b8;margin-top:0.4rem;">At least 8
+                    <div class="setup-only" style="font-size:0.76rem;color:var(--muted);margin-top:0.4rem;">At least 8
                         characters.</div>
                     <div class="show-password">
                         <input type="checkbox" id="showPasswordCheck" onchange="togglePasswordVisibility()">

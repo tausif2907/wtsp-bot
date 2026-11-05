@@ -167,8 +167,8 @@ router.get('/orders/:orderId/invoice', async (req, res) => {
         let html = await generateInvoiceHtml(order, statusLabel, mapUrl);
         // Add the print button for the dashboard view
         html += `
-<div class="no-print" style="text-align:center; margin-top:20px; padding-bottom: 40px;">
-    <button onclick="window.print()" style="padding:10px 30px; background:${STORE.colors.primary}; color:white; border:none; border-radius:8px; cursor:pointer; font-size:14px; font-weight:600; text-transform:uppercase; letter-spacing:1px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">Print Invoice</button>
+<div class="no-print" style="text-align:center; padding: 4px 0 40px;">
+    <button onclick="window.print()" style="padding:11px 28px; background:${STORE.colors.primary}; color:#fff; border:none; border-radius:10px; cursor:pointer; font-family:Inter,'Segoe UI',Arial,sans-serif; font-size:14px; font-weight:600; box-shadow:0 4px 14px rgba(15,118,110,0.25);">Print or save as PDF</button>
 </div>
 </body></html>`;
 
