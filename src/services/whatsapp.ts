@@ -1,6 +1,9 @@
 import axios from 'axios';
 import FormData from 'form-data';
 
+// Meta retires each Graph API version about two years after release; keep this current
+const GRAPH_API = 'https://graph.facebook.com/v25.0';
+
 export class WhatsAppService {
     private token: string;
     private phoneId: string;
@@ -11,7 +14,7 @@ export class WhatsAppService {
     }
 
     private get baseUrl() {
-        return `https://graph.facebook.com/v18.0/${this.phoneId}/messages`;
+        return `${GRAPH_API}/${this.phoneId}/messages`;
     }
 
     private get headers() {
@@ -111,7 +114,7 @@ export class WhatsAppService {
             });
             formData.append('messaging_product', 'whatsapp');
 
-            const uploadUrl = `https://graph.facebook.com/v18.0/${this.phoneId}/media`;
+            const uploadUrl = `${GRAPH_API}/${this.phoneId}/media`;
             const response = await axios.post(uploadUrl, formData, {
                 headers: {
                     ...formData.getHeaders(),
@@ -128,7 +131,7 @@ export class WhatsAppService {
     /** Fetches a photo or file a customer sent. WhatsApp media links only work with our token. */
     async downloadMedia(mediaId: string): Promise<{ data: Buffer; mimeType: string } | null> {
         try {
-            const meta = await axios.get(`https://graph.facebook.com/v18.0/${mediaId}`, { headers: this.headers });
+            const meta = await axios.get(`${GRAPH_API}/${mediaId}`, { headers: this.headers });
             const file = await axios.get(meta.data.url, {
                 headers: { 'Authorization': `Bearer ${this.token}` },
                 responseType: 'arraybuffer'
